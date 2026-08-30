@@ -17,7 +17,7 @@ Brave (ve Chromium tabanlı diğer tarayıcılar) için Manifest V3 eklentisi.
 ## Kurulum (Brave / Chrome / Edge)
 
 ```bash
-git clone https://github.com/<BeratYumak>/cookie-shield.git
+git clone https://github.com/BeratYumak/cookie-shield.git
 ```
 
 veya GitHub'daki **Code → Download ZIP** ile indirip bir yere çıkart.
