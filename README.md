@@ -2,17 +2,36 @@
 
 Brave (ve Chromium tabanlı diğer tarayıcılar) için Manifest V3 eklentisi.
 
-Üç işi birlikte yapar:
+**Varsayılan olarak hiçbir şey yapmaz.** Bir sitede çerez uyarısı seni zorladığında
+🛡️ simgesine tıklayıp *"&lt;site&gt; için korumayı aç"* dersin; eklenti yalnızca o
+sitede (ve alt alan adlarında) devreye girer. Geri kalan her yerde tarayıcın
+tamamen dokunulmamış kalır — ne çerez engellenir, ne banner'a müdahale edilir,
+ne ek istek başlığı gönderilir.
 
-1. **Çerez onay pop-up'larını kapatır** — banner'ı sadece gizlemek yerine sitenin
+Açtığın sitede üç işi birlikte yapar:
+
+1. **Çerez onay pop-up'ını kapatır** — banner'ı sadece gizlemek yerine sitenin
    kendi *"Tümünü Reddet"* akışını tetikler. Site rızayı **red** olarak kaydeder,
    bu yüzden özellikler kapanmaz ve banner her ziyarette geri gelmez.
-2. **Tüm sitelerde çerezleri engeller** — `Cookie` / `Set-Cookie` başlıkları
-   ağ katmanında (declarativeNetRequest) kaldırılır, JS ile yazılan çerezler
-   silinir veya hafızadaki *sanal kavanoza* yönlendirilir.
+2. **Çerezleri engeller** — `Cookie` / `Set-Cookie` başlıkları ağ katmanında
+   (declarativeNetRequest) kaldırılır, JS ile yazılan çerezler silinir veya
+   hafızadaki *sanal kavanoza* yönlendirilir.
 3. **Reddetmeye izin vermeyen siteleri aşar** — çerez duvarı, kaydırma kilidi,
-   bulanıklık ve örtü katmanı temizlenir; her istekte `Sec-GPC: 1` + `DNT: 1`
+   bulanıklık ve örtü katmanı temizlenir; isteklerde `Sec-GPC: 1` + `DNT: 1`
    gönderilir ve Google Consent Mode'a `denied` bildirilir.
+
+## Kullanım akışı
+
+1. Siteye girdin, çerez uyarısı çıktı ve kabul etmek istemiyorsun.
+2. 🛡️ simgesine tıkla → **"&lt;site&gt; için korumayı aç"**.
+3. Eklenti o site için kuralları yazar, sitenin mevcut çerezlerini siler ve
+   sekmeyi yeniler (ayarlardan kapatılabilir). Sayfa açık kalsa bile reddetme
+   turu anında başlar.
+4. Sitede işin bittiğinde aynı düğmeyle korumayı kapatabilirsin; kurallar ve
+   liste kaydı temizlenir, site tamamen normale döner.
+
+Eski (agresif) davranışı isteyenler için **Kapsam → Tüm siteler** seçeneği durur:
+o modda eklenti her sitede çalışır ve istisnalar izin listesinden yönetilir.
 
 ## Kurulum (Brave / Chrome / Edge)
 
@@ -50,31 +69,35 @@ Saha kanıtı (milliyet.com.tr, eklenti kapalı → açık):
 | ![Kapalı](docs/ab-milliyet.com.tr-kapali.png) | ![Açık](docs/ab-milliyet.com.tr-acik.png) |
 
 
-## Çerez modları
+## Kapsam ve çerez modları
 
-| Mod | Ne yapar | Kime uygun |
+**Kapsam** eklentinin nerede çalıştığını, **çerez modu** çalıştığı yerde ne kadar
+katı olduğunu belirler.
+
+| Kapsam | Ne yapar |
+| --- | --- |
+| **Sadece açtığım siteler** (varsayılan) | Eklenti yalnızca `enabledSites` listesindeki sitelerde çalışır. Liste boşken tarayıcıya hiç dokunulmaz: statik kural seti açılmaz, dinamik kural yazılmaz, tarayıcı geneli çerez ayarı değiştirilmez. |
+| **Tüm siteler** | Her sitede çalışır; istisnalar izin listesi ve "eklentinin kapalı olduğu siteler" listesinden yönetilir (1.0 davranışı). |
+
+| Çerez modu | Ne yapar | Kime uygun |
 | --- | --- | --- |
-| **Tümünü engelle** (varsayılan) | Tüm sitelerde çerez yazımı ve gönderimi engellenir. `document.cookie` sanal kavanoza yazılır: sayfa çalışır, çerez diske yazılmaz, sunucuya gitmez. | En katı gizlilik. Giriş yapılan siteler izin listesine eklenmeli. |
+| **Tümünü engelle** (varsayılan) | Açık sitede çerez yazımı ve gönderimi engellenir. `document.cookie` sanal kavanoza yazılır: sayfa çalışır, çerez diske yazılmaz, sunucuya gitmez. | En katı gizlilik. Giriş yaptığın sitede korumayı kapat. |
 | **Oturum boyu** | Çerezler normal çalışır, sitenin son sekmesi kapanınca silinir. Üçüncü taraf çerezler yine engellenir. | "Girişler bozulmasın ama iz kalmasın" isteyenler. |
 | **Sadece 3. taraf** | Takipçi çerezleri engellenir, sitenin kendi çerezleri kalır. | Günlük kullanım, en az sürtünme. |
 | **Kapalı** | Çerezlere dokunulmaz, sadece pop-up reddi çalışır. | Yalnızca banner'lardan kurtulmak isteyenler. |
 
-**İzin listesi:** Banka, e-posta, iş panelleri gibi oturumun kalması gereken
-siteleri popup'taki *"&lt;site&gt; için çerezlere izin ver"* ile veya ayarlar
-sayfasındaki listeye ekleyerek muaf tut.
+Eylemler **site bazlıdır, adres yolu (path) hiç dikkate alınmaz.** Popup'taki
+eylemler (korumayı aç/kapat / çerezleri sil) aktif sekmenin kayıtlanabilir alan
+adına (eTLD+1) uygulanır ve tüm alt alan adlarını kapsar:
 
-İzin **site bazlıdır, adres yolu (path) hiç dikkate alınmaz.** Popup'taki
-eylemler (izin ver / eklentiyi kapat / çerezleri sil) aktif sekmenin
-kayıtlanabilir alan adına (eTLD+1) uygulanır ve tüm alt alan adlarını kapsar:
-
-- `github.com/berat/proje` sayfasında izin ver → kayıt `github.com`,
-  `gist.github.com` ve `api.github.com` dahil site geneli muaf olur.
-- `gist.github.com` üzerinde izin ver → yine `github.com` yazılır; oturum çerezi
-  `.github.com` üzerinde durduğu için giriş bozulmaz.
+- `github.com/berat/proje` sayfasında aç → kayıt `github.com`,
+  `gist.github.com` ve `api.github.com` dahil site geneli kapsanır.
+- `gist.github.com` üzerinde aç → yine `github.com` yazılır; oturum çerezi
+  `.github.com` üzerinde durduğu için kapsam tutarlı olur.
 - `hepsiburada.com.tr`, `bbc.co.uk` gibi çok parçalı sonekler doğru ayrıştırılır;
   `berat.github.io` / `proje.pages.dev` gibi paylaşımlı barındırma soneklerinde
   kapsam yalnızca kendi alt alan adıdır (komşu sitelere sızmaz).
-- İzni kaldırdığında o sitenin altındaki daha dar kayıtlar da temizlenir.
+- Korumayı kapattığında o sitenin altındaki daha dar kayıtlar da temizlenir.
 
 Daha dar bir kapsam istersen ayarlar sayfasındaki listeye tek bir alt alan adı
 (`gist.github.com`) elle yazabilirsin.
@@ -117,12 +140,16 @@ Türkçe dahil 10+ dil desteklenir (`Tümünü Reddet`, `Sadece Zorunlu Çerezle
 
 - **Sunucu tarafı çerez duvarı** (içerik hiç gönderilmiyorsa) tarayıcı eklentisiyle
   aşılamaz — orada abonelik/ödeme duvarı vardır.
-- **Tümünü engelle** modunda oturum açılan siteler izin listesine eklenmezse
-  "çıkış yapıldı" davranışı normaldir. Popup bunu hatırlatır.
+- **Tümünü engelle** modunda korumayı açtığın sitede oturum açıksan "çıkış yapıldı"
+  davranışı normaldir: etkinleştirme o sitenin çerezlerini siler. Giriş gerekiyorsa
+  korumayı kapat ya da "oturum boyu" moduna geç.
+- Site kapsamında korumayı açtığın sayfaya gömülü üçüncü taraf iframe'lerin *kendi
+  içindeki* `document.cookie` yazımları engellenmez; o çerezler ağ katmanında
+  (`Set-Cookie` / `Cookie` sıyırma) durdurulur.
 - Geçerli TCF onay dizesi (TCString) üretilmez; standart dışı `rejectAll` komutunu
   desteklemeyen TCF CMP'lerinde DOM tıklaması veya son çare devreye girer.
 - `document.cookie` koruması `document_start`'ta kurulur; ayarlar okunana kadarki
-  yazımlar tamponlanır (engelleme kapalıysa gerçek çerezlere aktarılır, açıksa
+  yazımlar tamponlanır (site kapsam dışıysa gerçek çerezlere aktarılır, içindeyse
   kavanozda kalır). Hiçbir yazım kaybolmaz.
 
 ## Test
@@ -130,20 +157,24 @@ Türkçe dahil 10+ dil desteklenir (`Tümünü Reddet`, `Sadece Zorunlu Çerezle
 ```bash
 npm install            # jsdom + puppeteer-core (yalnızca test için)
 npm run lint           # tüm kaynaklarda söz dizimi kontrolü
-npm test               # 34 birim/DOM testi (jsdom)
-npm run e2e            # gerçek Brave'de 26 uçtan uca kontrol
+npm test               # 48 birim/DOM testi (jsdom)
+npm run e2e            # gerçek Brave'de 38 uçtan uca kontrol
 node test/real-sites.mjs   # canlı sitelerde saha kontrolü (ağ gerekir)
 ```
 
 Son doğrulama durumu:
 
-- `npm test` → 34/34 geçti
-- `npm run e2e` → 26/26 geçti (gerçek reddet tıklaması, API çağrısı, `Set-Cookie`
-  engelleme, sanal kavanoz, çerez duvarı, izin listesi istisnası, izin kapsamının
-  alt alan adlarını kapsaması, arayüzler)
+- `npm test` → 48/48 geçti
+- `npm run e2e` → 38/38 geçti: varsayılanda **sıfır müdahale** (banner'a
+  dokunulmaz, çerez çalışır, kural yazılmaz), sayfa açıkken etkinleştirmenin
+  reddetmeyi anında tetiklemesi, gerçek reddet tıklaması, API çağrısı,
+  `Set-Cookie` engelleme, sanal kavanoz, çerez duvarı, kapsamın alt alan
+  adlarını kapsayıp komşu siteye sızmaması, korumayı kapatınca her şeyin
+  normale dönmesi, "tüm siteler" kapsamı + izin listesi, arayüzler
 - `test/real-sites.mjs` → BBC, Hepsiburada, Milliyet, Zeit, Guardian: banner temiz,
   0 çerez, 13 gerçek reddetme; içerik karşılaştırmasında metin/bağlantı/görsel
-  sayıları eklentisiz duruma **eşit** (site bozulmuyor).
+  sayıları eklentisiz duruma **eşit** (site bozulmuyor). Bu betik siteleri
+  kendisi etkinleştirerek ölçer.
 
 ## Gizlilik
 

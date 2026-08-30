@@ -11,41 +11,60 @@
       <p class="lead">
         Çerez onay pop-up'larını sitenin kendi <b>“Reddet”</b> akışını tetikleyerek kapatır,
         çerez duvarlarını aşar ve çerezleri seçtiğin moda göre engeller.
+        <b>Varsayılan olarak hiçbir sitede çalışmaz</b> — bir sitede çerez uyarısı seni
+        zorladığında araç çubuğundaki simgeden o siteyi açarsın.
       </p>
 
       <fieldset>
+        <legend>Kapsam</legend>
+        <label class="check"><input type="radio" name="scope" value="sites" /> <b>Sadece açtığım siteler</b> (varsayılan) — eklenti yalnızca aşağıdaki listedeki sitelerde çalışır, geri kalan her yerde tarayıcıya hiç dokunmaz.</label>
+        <label class="check"><input type="radio" name="scope" value="all" /> <b>Tüm siteler</b> — her sitede çalışır; istisnaları izin listesinden yönetirsin.</label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Korumanın açık olduğu siteler</legend>
+        <textarea data-list="enabledSites" rows="6" spellcheck="false" placeholder="milliyet.com.tr&#10;zeit.de"></textarea>
+        <p class="hint">
+          Her satıra bir alan adı; alt alan adları otomatik kapsanır. Bu liste
+          “sadece açtığım siteler” kapsamında geçerlidir ve popup'taki
+          “bu sitede korumayı aç” düğmesi buraya yazar.
+        </p>
+      </fieldset>
+
+      <fieldset>
         <legend>Genel</legend>
-        <label class="check"><input type="checkbox" data-key="enabled" /> Korumayı etkinleştir</label>
+        <label class="check"><input type="checkbox" data-key="enabled" /> Eklentiyi etkinleştir (ana anahtar)</label>
         <label class="check"><input type="checkbox" data-key="autoReject" /> Onay pop-up'larını otomatik reddet</label>
         <label class="check"><input type="checkbox" data-key="hideAsLastResort" /> Reddet seçeneği yoksa banner'ı son çare olarak gizle</label>
         <label class="check"><input type="checkbox" data-key="bypassCookieWalls" /> Çerez duvarını aş (kaydırma kilidi, bulanıklık, örtü katmanı)</label>
         <label class="check"><input type="checkbox" data-key="hardBlockDocumentCookie" /> JS çerezlerini de engelle (<code>document.cookie</code> sanal kavanoza yazılır)</label>
-        <label class="check"><input type="checkbox" data-key="clearCookiesOnStartup" /> Tarayıcı her açıldığında tüm çerezleri sil</label>
+        <label class="check"><input type="checkbox" data-key="reloadOnActivate" /> Bir siteyi açtığımda sekmeyi yenile (banner sıfırdan reddedilsin)</label>
+        <label class="check"><input type="checkbox" data-key="clearCookiesOnStartup" /> Tarayıcı her açıldığında çerezleri sil (kapsamdaki siteler için)</label>
         <label class="check"><input type="checkbox" data-key="debug" /> Konsola ayrıntılı kayıt yaz</label>
       </fieldset>
 
       <fieldset>
         <legend>Çerez modu</legend>
-        <label class="check"><input type="radio" name="mode" value="blockAll" /> <b>Tümünü engelle</b> — tüm sitelerde <code>Cookie</code>/<code>Set-Cookie</code> başlıkları kaldırılır, JS çerezleri diske yazılmaz.</label>
+        <label class="check"><input type="radio" name="mode" value="blockAll" /> <b>Tümünü engelle</b> — korumanın açık olduğu sitelerde <code>Cookie</code>/<code>Set-Cookie</code> başlıkları kaldırılır, JS çerezleri diske yazılmaz.</label>
         <label class="check"><input type="radio" name="mode" value="sessionOnly" /> <b>Oturum boyu</b> — çerezler çalışır, sitenin son sekmesi kapanınca silinir. Girişler sayfa içinde bozulmaz.</label>
         <label class="check"><input type="radio" name="mode" value="thirdParty" /> <b>Sadece 3. taraf</b> — takipçi çerezleri engellenir, sitenin kendi çerezleri kalır.</label>
         <label class="check"><input type="radio" name="mode" value="off" /> <b>Kapalı</b> — çerezlere dokunulmaz, sadece pop-up reddi çalışır.</label>
         <p class="hint">
-          “Tümünü engelle” en katı seçenek. Giriş yaptığın siteler oturumu koruyamaz;
-          onları aşağıdaki izin listesine ekle veya adres çubuğundaki simgeden
-          “Bu sitede çerezlere izin ver” de.
+          Bu mod yalnızca korumanın açık olduğu sitelerde uygulanır. “Tümünü engelle”
+          en katı seçenek; giriş yaptığın bir sitede oturum kaybediyorsan o site için
+          korumayı kapat ya da “oturum boyu” moduna geç.
         </p>
       </fieldset>
 
       <fieldset>
-        <legend>İzin listesi (çerezlere dokunulmaz)</legend>
-        <textarea data-list="allowlist" rows="6" spellcheck="false" placeholder="ornek.com&#10;banka.com.tr"></textarea>
-        <p class="hint">Her satıra bir alan adı. Alt alan adları otomatik kapsanır.</p>
+        <legend>İzin listesi (yalnızca “tüm siteler” kapsamında)</legend>
+        <textarea data-list="allowlist" rows="5" spellcheck="false" placeholder="ornek.com&#10;banka.com.tr"></textarea>
+        <p class="hint">Her satıra bir alan adı. Alt alan adları otomatik kapsanır. Bu sitelerde çerezlere dokunulmaz.</p>
       </fieldset>
 
       <fieldset>
-        <legend>Eklentinin tamamen kapalı olduğu siteler</legend>
-        <textarea data-list="disabledSites" rows="4" spellcheck="false" placeholder="sorunlu-site.com"></textarea>
+        <legend>Eklentinin tamamen kapalı olduğu siteler (yalnızca “tüm siteler” kapsamında)</legend>
+        <textarea data-list="disabledSites" rows="3" spellcheck="false" placeholder="sorunlu-site.com"></textarea>
         <p class="hint">Bu sitelerde pop-up reddi, gizleme ve kilit çözümü de çalışmaz.</p>
       </fieldset>
 
@@ -64,6 +83,7 @@
       <details>
         <summary>Nasıl çalışıyor? / Bilinen sınırlar</summary>
         <ul>
+          <li><b>Varsayılan pasif:</b> kurulumda hiçbir sitede müdahale yoktur; ne çerez engellenir ne pop-up reddedilir ne de <code>Sec-GPC</code> gönderilir. Bir sitede simgeye tıklayıp “korumayı aç” dediğinde yalnızca o site (ve alt alan adları) için kurallar yazılır.</li>
           <li><b>Gerçek reddetme:</b> 25+ CMP için sağlayıcının kendi API'si (OneTrust, Cookiebot, Didomi, Usercentrics, Osano, Klaro, Iubenda, Complianz, tarteaucitron, Piwik PRO, consentmanager…) veya “Tümünü reddet” butonu tıklanır. Site rızayı “red” olarak kaydeder, bu yüzden özellikleri kapanmaz ve banner tekrar açılmaz.</li>
           <li><b>Bilinmeyen CMP:</b> Sezgisel tarama banner'ı bulur; “Reddet” yoksa tercih panelini açıp isteğe bağlı kutuları kapatır ve kaydeder.</li>
           <li><b>Reddetmeye izin vermeyen siteler:</b> Rıza kaydedilemiyorsa banner + örtü katmanı gizlenir, kaydırma kilidi ve bulanıklık kaldırılır. Ayrıca her istekte <code>Sec-GPC: 1</code> ve <code>DNT: 1</code> gönderilir; Google Consent Mode'a “denied” bildirilir.</li>

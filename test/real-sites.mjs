@@ -45,6 +45,18 @@ for (let i = 0; i < 40 && !swTarget; i++) {
 const worker = swTarget ? await swTarget.worker() : null;
 console.log('eklenti:', swTarget ? 'yüklü' : 'YÜKLENEMEDİ');
 
+// Eklenti varsayılan olarak hiçbir sitede çalışmaz: ölçülecek siteleri aç.
+if (worker) {
+  const hosts = SITES.map((u) => new URL(u).hostname);
+  const active = await worker.evaluate(async (hs) => {
+    const sites = Array.from(new Set(hs.map((h) => self.CookieShield.registrableDomain(h))));
+    await chrome.storage.local.set({ enabledSites: sites, enabled: true, scopeMode: 'sites' });
+    return sites;
+  }, hosts);
+  await sleep(1500); // kurallar devreye girsin
+  console.log('etkinleştirilen siteler:', active.join(', '));
+}
+
 for (const url of SITES) {
   const page = await browser.newPage();
   let row = { url, banner: '?', cookies: '?', hata: null };

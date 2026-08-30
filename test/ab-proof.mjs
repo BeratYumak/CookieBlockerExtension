@@ -38,12 +38,18 @@ for (let i = 0; i < 40 && !t; i++) {
   if (!t) await sleep(250);
 }
 const worker = await t.worker();
-// debug loglarını aç
-await worker.evaluate(async () => {
-  const cur = (await chrome.storage.local.get('settings')).settings || {};
-  cur.debug = true;
-  await chrome.storage.local.set({ settings: cur });
-});
+// debug loglarını aç ve ölçülecek siteyi etkinleştir (varsayılan: hiçbir yerde çalışmaz)
+const activeSite = await worker.evaluate(async (url) => {
+  const site = self.CookieShield.registrableDomain(new URL(url).hostname);
+  await chrome.storage.local.set({
+    debug: true,
+    enabled: true,
+    scopeMode: 'sites',
+    enabledSites: [site]
+  });
+  return site;
+}, URL_);
+console.log('etkinleştirilen site:', activeSite);
 await sleep(1200);
 
 const page = await browser.newPage();

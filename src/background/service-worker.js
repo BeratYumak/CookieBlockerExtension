@@ -14,7 +14,15 @@ const DEFAULTS = CS.DEFAULTS;
 
 const RULESET_ALL = 'block-all-cookies';
 const RULESET_3P = 'block-third-party-cookies';
-const ALLOW_RULE_BASE = 1000;
+const RULESET_SIGNALS = 'privacy-signals';
+const DYNAMIC_RULE_BASE = 1000;
+
+const ALL_TYPES = [
+  'main_frame', 'sub_frame', 'stylesheet', 'script', 'image', 'font',
+  'object', 'xmlhttprequest', 'ping', 'csp_report', 'media', 'websocket', 'other'
+];
+const SUB_TYPES = ALL_TYPES.filter((t) => t !== 'main_frame');
+const SIGNAL_TYPES = ['main_frame', 'sub_frame', 'xmlhttprequest', 'script'];
 
 let cache = null;
 
@@ -33,14 +41,27 @@ async function setSettings(patch) {
   return next;
 }
 
+const siteScoped = (s) => (s.scopeMode || DEFAULTS.scopeMode) === 'sites';
+
+/** 'sites' kapsamında koruma açık olan siteler (normalize + tekilleştirilmiş). */
+function activeSites(s) {
+  return Array.from(
+    new Set((s.enabledSites || []).map((h) => CS.normHost(h)).filter(Boolean))
+  );
+}
+
 // ------------------------------------------------------------------- kural seti
 async function applyRulesets(s) {
+  // Site kapsamında hiçbir statik (global) kural seti açılmaz: varsayılan olarak
+  // tarayıcıya hiç dokunulmaz, iş dinamik kurallarla yalnızca seçili sitelerde
+  // yapılır.
+  const global = s.enabled && !siteScoped(s);
   const enable = [];
   const disable = [];
-  const on = s.enabled && s.cookieMode === 'blockAll';
-  const on3p = s.enabled && (s.cookieMode === 'thirdParty' || s.cookieMode === 'sessionOnly');
-  (on ? enable : disable).push(RULESET_ALL);
-  (on3p ? enable : disable).push(RULESET_3P);
+  (global && s.cookieMode === 'blockAll' ? enable : disable).push(RULESET_ALL);
+  (global && (s.cookieMode === 'thirdParty' || s.cookieMode === 'sessionOnly') ? enable : disable)
+    .push(RULESET_3P);
+  (global ? enable : disable).push(RULESET_SIGNALS);
   try {
     await chrome.declarativeNetRequest.updateEnabledRulesets({
       enableRulesetIds: enable,
@@ -51,41 +72,96 @@ async function applyRulesets(s) {
   }
 }
 
-/** İzin listesindeki hostlar için yüksek öncelikli "allow" istisnaları. */
-async function applyAllowRules(s) {
+const stripCookieRules = (condition, nextId) => [
+  {
+    id: nextId(),
+    priority: 2,
+    action: { type: 'modifyHeaders', requestHeaders: [{ header: 'cookie', operation: 'remove' }] },
+    condition: Object.assign({}, condition)
+  },
+  {
+    id: nextId(),
+    priority: 2,
+    action: {
+      type: 'modifyHeaders',
+      responseHeaders: [{ header: 'set-cookie', operation: 'remove' }]
+    },
+    condition: Object.assign({}, condition)
+  }
+];
+
+const signalRules = (site, nextId) =>
+  [{ requestDomains: [site] }, { initiatorDomains: [site] }].map((base) => ({
+    id: nextId(),
+    priority: 1,
+    action: {
+      type: 'modifyHeaders',
+      requestHeaders: [
+        { header: 'sec-gpc', operation: 'set', value: '1' },
+        { header: 'dnt', operation: 'set', value: '1' }
+      ]
+    },
+    condition: Object.assign({ resourceTypes: SIGNAL_TYPES }, base)
+  }));
+
+/**
+ * Dinamik kurallar iki işi görür:
+ *  - 'sites' kapsamı: seçili sitelerde çerez başlıklarını sıyır + GPC/DNT gönder.
+ *  - 'all' kapsamı: izin listesindeki siteler için yüksek öncelikli "allow".
+ */
+async function applyDynamicRules(s) {
   const existing = await chrome.declarativeNetRequest.getDynamicRules();
   const removeRuleIds = existing.map((r) => r.id);
-  const hosts = (s.allowlist || []).map((h) => CS.normHost(h)).filter(Boolean);
   const addRules = [];
-  let id = ALLOW_RULE_BASE;
-  const types = [
-    'main_frame', 'sub_frame', 'stylesheet', 'script', 'image', 'font',
-    'object', 'xmlhttprequest', 'ping', 'csp_report', 'media', 'websocket', 'other'
-  ];
-  for (const host of hosts) {
-    addRules.push({
-      id: id++,
-      priority: 100,
-      action: { type: 'allow' },
-      condition: { requestDomains: [host], resourceTypes: types }
-    });
-    addRules.push({
-      id: id++,
-      priority: 100,
-      action: { type: 'allow' },
-      condition: { initiatorDomains: [host], resourceTypes: types }
-    });
+  let id = DYNAMIC_RULE_BASE;
+  const nextId = () => id++;
+
+  if (!s.enabled) {
+    // Ana anahtar kapalı: hiçbir kural kalmaz.
+  } else if (siteScoped(s)) {
+    for (const site of activeSites(s)) {
+      addRules.push(...signalRules(site, nextId));
+      if (s.cookieMode === 'blockAll') {
+        addRules.push(...stripCookieRules({ requestDomains: [site], resourceTypes: ALL_TYPES }, nextId));
+        addRules.push(...stripCookieRules({ initiatorDomains: [site], resourceTypes: ALL_TYPES }, nextId));
+      } else if (s.cookieMode === 'thirdParty' || s.cookieMode === 'sessionOnly') {
+        addRules.push(
+          ...stripCookieRules(
+            { initiatorDomains: [site], domainType: 'thirdParty', resourceTypes: SUB_TYPES },
+            nextId
+          )
+        );
+      }
+    }
+  } else {
+    const hosts = (s.allowlist || []).map((h) => CS.normHost(h)).filter(Boolean);
+    for (const host of hosts) {
+      for (const base of [{ requestDomains: [host] }, { initiatorDomains: [host] }]) {
+        addRules.push({
+          id: nextId(),
+          priority: 100,
+          action: { type: 'allow' },
+          condition: Object.assign({ resourceTypes: ALL_TYPES }, base)
+        });
+      }
+    }
   }
+
   try {
     await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds, addRules });
   } catch (e) {
-    console.warn('[CookieShield] izin kuralları yazılamadı', e);
+    console.warn('[CookieShield] dinamik kurallar yazılamadı', e);
   }
 }
 
 async function applyPrivacyApi(s) {
-  const block = s.enabled && (s.cookieMode === 'blockAll' || s.cookieMode === 'thirdParty');
+  // Bu ayar tarayıcı genelidir; site kapsamında ona hiç dokunmayız.
   try {
+    if (siteScoped(s) || !s.enabled) {
+      await chrome.privacy.websites.thirdPartyCookiesAllowed.clear({});
+      return;
+    }
+    const block = s.cookieMode === 'blockAll' || s.cookieMode === 'thirdParty';
     await chrome.privacy.websites.thirdPartyCookiesAllowed.set({ value: !block });
   } catch (e) {
     // Brave bu ayarı yönetmiyor olabilir; DNR kuralları yine devrede.
@@ -95,9 +171,30 @@ async function applyPrivacyApi(s) {
 async function applyAll() {
   const s = await getSettings(true);
   await applyRulesets(s);
-  await applyAllowRules(s);
+  await applyDynamicRules(s);
   await applyPrivacyApi(s);
+  await updateActionIcon(s);
   return s;
+}
+
+/** Rozet başlığı: aktif sekmede korumanın açık olup olmadığını göster. */
+async function updateActionIcon(s) {
+  try {
+    const tabs = await chrome.tabs.query({});
+    for (const t of tabs) {
+      let host = null;
+      try {
+        host = new URL(t.url).hostname;
+      } catch (_) { /* yoksay */ }
+      const on = host ? CS.isActiveHost(s, host) : false;
+      await chrome.action.setTitle({
+        tabId: t.id,
+        title: on
+          ? `Cookie Shield: ${CS.registrableDomain(host)} için açık`
+          : 'Cookie Shield: bu sitede kapalı (açmak için tıkla)'
+      });
+    }
+  } catch (_) { /* yoksay */ }
 }
 
 // ------------------------------------------------------- çerez silme mekanizması
@@ -142,10 +239,10 @@ chrome.cookies.onChanged.addListener(async ({ cookie, removed, cause }) => {
   if (removed) return;
   if (cause === 'evicted' || cause === 'expired') return;
   const s = await getSettings();
-  if (!s.enabled || s.cookieMode === 'off' || s.cookieMode === 'sessionOnly') return;
   const domain = String(cookie.domain || '').replace(/^\./, '');
-  if (CS.hostMatches(s.allowlist, domain)) return;
-  if (s.cookieMode === 'thirdParty') {
+  const mode = CS.cookieModeFor(s, domain);
+  if (mode === 'off' || mode === 'sessionOnly') return;
+  if (mode === 'thirdParty') {
     // Birinci taraf çerezler kalsın: açık sekmelerden biriyle eşleşiyorsa dokunma
     const hosts = await openHosts();
     if (hosts.some((h) => h === domain || h.endsWith('.' + domain))) return;
@@ -184,7 +281,7 @@ async function sweepClosedSites() {
   let n = 0;
   for (const c of all) {
     const domain = String(c.domain || '').replace(/^\./, '');
-    if (CS.hostMatches(s.allowlist, domain)) continue;
+    if (CS.cookieModeFor(s, domain) !== 'sessionOnly') continue;
     const stillOpen = hosts.some((h) => h === domain || h.endsWith('.' + domain) || domain.endsWith('.' + h));
     if (stillOpen) continue;
     if (await removeCookie(c)) n++;
@@ -193,16 +290,34 @@ async function sweepClosedSites() {
   if (n) console.log('[CookieShield] kapanan sitelerin çerezleri silindi:', n);
 }
 
+/**
+ * host verilirse o sitenin (eTLD+1 + alt alan adları) çerezlerini siler.
+ * host verilmezse: site kapsamında yalnızca korumanın açık olduğu sitelerin,
+ * 'all' kapsamında ise izin listesi dışındaki her şeyin çerezleri silinir.
+ */
 async function clearCookies(host) {
   const s = await getSettings();
-  // Verilen host site kapsamıdır (eTLD+1); Chrome `domain` filtresi alt alan
-  // adlarını da kapsar.
   const site = host ? CS.normHost(host) : null;
-  const all = await chrome.cookies.getAll(site ? { domain: site } : {});
+  if (site) {
+    // Chrome `domain` filtresi alt alan adlarını da kapsar.
+    const all = await chrome.cookies.getAll({ domain: site });
+    let n = 0;
+    for (const c of all) if (await removeCookie(c)) n++;
+    return n;
+  }
+  if (siteScoped(s)) {
+    let n = 0;
+    for (const target of activeSites(s)) {
+      for (const c of await chrome.cookies.getAll({ domain: target })) {
+        if (await removeCookie(c)) n++;
+      }
+    }
+    return n;
+  }
   let n = 0;
-  for (const c of all) {
+  for (const c of await chrome.cookies.getAll({})) {
     const domain = String(c.domain || '').replace(/^\./, '');
-    if (!site && CS.hostMatches(s.allowlist, domain)) continue;
+    if (CS.hostMatches(s.allowlist, domain)) continue;
     if (await removeCookie(c)) n++;
   }
   return n;
@@ -267,7 +382,7 @@ async function buildState() {
       host = new URL(tab.url).hostname;
     } catch (_) { /* yoksay */ }
   }
-  // Eylemler (izin/kapat/temizle) sitenin tamamına uygulanır, tek alt alan
+  // Eylemler (aç/kapat/temizle) sitenin tamamına uygulanır, tek alt alan
   // adına değil: gist.github.com -> github.com
   const site = host ? CS.registrableDomain(host) : null;
   let cookieCount = null;
@@ -284,13 +399,39 @@ async function buildState() {
     tabId,
     cookieCount,
     tabActions: tabId ? tabCounters.get(tabId) || 0 : 0,
+    scopeMode: s.scopeMode || DEFAULTS.scopeMode,
+    siteActive: host ? CS.isActiveHost(s, host) : false,
+    effectiveCookieMode: host ? CS.cookieModeFor(s, host) : 'off',
     allowlisted: host ? CS.hostMatches(s.allowlist, host) : false,
     siteDisabled: host ? CS.hostMatches(s.disabledSites, host) : false
   };
 }
 
+/**
+ * Bir siteyi aç/kapat. Açarken: kural yaz, sitenin mevcut çerezlerini temizle
+ * ve (ayarlıysa) sekmeyi yenile — böylece banner sıfırdan reddedilir ve
+ * başlık sıyırma ilk istekten itibaren devrede olur.
+ */
+async function setSiteActive(host, on, tabId) {
+  const s = await getSettings();
+  const site = CS.registrableDomain(host);
+  if (!site) return { ok: false, error: 'gecersiz host' };
+  await setSettings({ enabledSites: CS.toggleHostList(s.enabledSites, site, on), enabled: true });
+  const next = await applyAll();
+  let removed = 0;
+  if (on) removed = await clearCookies(site);
+  let reloaded = false;
+  if (tabId != null && next.reloadOnActivate) {
+    try {
+      await chrome.tabs.reload(tabId, { bypassCache: false });
+      reloaded = true;
+    } catch (_) { /* yoksay */ }
+  }
+  return { ok: true, site, on, removed, reloaded, settings: next };
+}
+
 // e2e testlerinin servis çalışanı içinden çağırabilmesi için
-self.CookieShieldSW = { buildState };
+self.CookieShieldSW = { buildState, setSiteActive };
 
 async function bumpBadge(tabId, n) {
   if (!tabId) return;
@@ -303,10 +444,27 @@ async function bumpBadge(tabId, n) {
 }
 
 chrome.tabs.onRemoved.addListener((tabId) => tabCounters.delete(tabId));
-chrome.tabs.onUpdated.addListener((tabId, info) => {
+chrome.tabs.onUpdated.addListener(async (tabId, info) => {
   if (info.status === 'loading' && info.url) {
     tabCounters.delete(tabId);
     chrome.action.setBadgeText({ text: '', tabId }).catch(() => {});
+  }
+  if (info.url || info.status === 'complete') {
+    const s = await getSettings();
+    let host = null;
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      host = new URL(tab.url).hostname;
+    } catch (_) { /* yoksay */ }
+    const on = host ? CS.isActiveHost(s, host) : false;
+    chrome.action
+      .setTitle({
+        tabId,
+        title: on
+          ? `Cookie Shield: ${CS.registrableDomain(host)} için açık`
+          : 'Cookie Shield: bu sitede kapalı (açmak için tıkla)'
+      })
+      .catch(() => {});
   }
 });
 
@@ -335,14 +493,19 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
         return respond({ ok: true, settings: s });
       }
       case 'cs:toggle-list': {
-        // msg.list: 'allowlist' | 'disabledSites'
+        // msg.list: 'allowlist' | 'disabledSites' | 'enabledSites'
         const s = await getSettings();
-        const key = msg.list === 'disabledSites' ? 'disabledSites' : 'allowlist';
+        const allowed = ['allowlist', 'disabledSites', 'enabledSites'];
+        const key = allowed.includes(msg.list) ? msg.list : 'allowlist';
         const host = CS.normHost(msg.host);
         if (!host) return respond({ ok: false });
         await setSettings({ [key]: CS.toggleHostList(s[key], host, !!msg.on) });
         await applyAll();
         return respond({ ok: true, settings: await getSettings(true) });
+      }
+      case 'cs:set-site-active': {
+        const res = await setSiteActive(msg.host, !!msg.on, msg.tabId);
+        return respond(res);
       }
       case 'cs:clear-cookies': {
         const n = await clearCookies(msg.host || null);

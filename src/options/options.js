@@ -21,6 +21,9 @@ function fill(s) {
   for (const el of document.querySelectorAll('input[name="mode"]')) {
     el.checked = el.value === s.cookieMode;
   }
+  for (const el of document.querySelectorAll('input[name="scope"]')) {
+    el.checked = el.value === (s.scopeMode || 'sites');
+  }
   for (const ta of document.querySelectorAll('textarea[data-list]')) {
     ta.value = (s[ta.dataset.list] || []).join('\n');
   }
@@ -48,6 +51,8 @@ async function save() {
   for (const el of document.querySelectorAll('input[data-key]')) patch[el.dataset.key] = el.checked;
   const mode = document.querySelector('input[name="mode"]:checked');
   if (mode) patch.cookieMode = mode.value;
+  const scope = document.querySelector('input[name="scope"]:checked');
+  if (scope) patch.scopeMode = scope.value;
   for (const ta of document.querySelectorAll('textarea[data-list]')) {
     patch[ta.dataset.list] = parseList(ta.value);
   }
@@ -59,13 +64,13 @@ async function save() {
 $('save').addEventListener('click', save);
 
 // Anahtarlar anında uygulanır (kaydet'e basmak zorunlu olmasın)
-for (const el of document.querySelectorAll('input[data-key], input[name="mode"]')) {
+for (const el of document.querySelectorAll('input[data-key], input[name="mode"], input[name="scope"]')) {
   el.addEventListener('change', save);
 }
 
 $('clearAll').addEventListener('click', async () => {
   const res = await send({ type: 'cs:clear-cookies' });
-  toast(`${(res && res.removed) || 0} çerez silindi (izin listesi korundu)`);
+  toast(`${(res && res.removed) || 0} çerez silindi (kapsam dışı siteler korundu)`);
   await load();
 });
 

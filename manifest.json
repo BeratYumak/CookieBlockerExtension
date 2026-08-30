@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Cookie Shield",
-  "version": "1.0.0",
-  "description": "Çerez onay pop-up'larını gerçek 'Reddet' tıklamasıyla kapatır, çerez duvarlarını aşar ve tüm sitelerde çerezleri engeller.",
+  "version": "1.1.0",
+  "description": "Varsayılan olarak pasif; açtığın sitede çerez onayını gerçek 'Reddet' tıklamasıyla kapatır, çerez duvarını aşar ve çerezleri engeller.",
   "minimum_chrome_version": "111",
   "permissions": [
     "storage",
@@ -67,7 +67,7 @@
       },
       {
         "id": "privacy-signals",
-        "enabled": true,
+        "enabled": false,
         "path": "rules/privacy-signals.json"
       }
     ]

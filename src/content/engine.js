@@ -1,7 +1,10 @@
 /**
  * Cookie Shield - engine.js (izole dünya / isolated world)
- * Akış:
- *  1) Ayarları oku, site pasifse hiç dokunma.
+ * Varsayılan duruş: hiçbir sitede kendiliğinden çalışmaz. Kullanıcı popup'tan
+ * "bu sitede korumayı aç" dediğinde site `enabledSites` listesine girer ve akış
+ * şöyle işler:
+ *  1) Ayarları oku, site aktif değilse MAIN dünyaya "engelleme yok" konfigi
+ *     gönder (tamponlanan çerez yazımları serbest kalsın) ve çık.
  *  2) MAIN dünyadaki ajana konfigürasyonu gönder (CMP JS API'leriyle reddet).
  *  3) Bilinen CMP adaptörlerini dene -> gerçek "Reddet" tıklaması.
  *  4) Adaptör yoksa sezgisel tarama -> reddet / tercih paneli / son çare gizleme.
@@ -32,17 +35,6 @@
   const log = (...args) => {
     if (state.settings && state.settings.debug) console.log('[CookieShield]', ...args);
   };
-
-  // ------------------------------------------------------------ host eşleşmesi
-  function hostMatches(list, host) {
-    if (!Array.isArray(list)) return false;
-    const h = String(host || '').toLowerCase().replace(/^www\./, '');
-    return list.some((raw) => {
-      const p = String(raw || '').toLowerCase().trim().replace(/^www\./, '');
-      if (!p) return false;
-      return h === p || h.endsWith('.' + p);
-    });
-  }
 
   // --------------------------------------------------------- MAIN dünya köprüsü
   function toPage(msg) {
@@ -277,34 +269,43 @@
   }
 
   // ---------------------------------------------------------------------- başlat
-  function start(settings) {
-    state.settings = Object.assign({}, CS.DEFAULTS, settings || {});
-    if (!state.settings.enabled) return;
-    if (hostMatches(state.settings.disabledSites, HOST)) {
-      log('bu sitede pasif:', HOST);
-      return;
-    }
+  let scheduled = false;
 
-    // MAIN dünya ajanına konfigürasyon
-    const allowlisted = hostMatches(state.settings.allowlist, HOST);
+  /** Sayfa dünyasındaki ajana güncel konfigürasyonu bildir. */
+  function pushConfig(active) {
     toPage({
       type: 'config',
-      blockCookies:
-        state.settings.hardBlockDocumentCookie &&
-        state.settings.cookieMode === 'blockAll' &&
-        !allowlisted,
-      autoReject: state.settings.autoReject,
-      gpc: true,
+      blockCookies: CS.isHardBlockedHost(state.settings, HOST),
+      autoReject: active && state.settings.autoReject,
+      gpc: active,
       debug: state.settings.debug
     });
+  }
 
-    if (!state.settings.autoReject) return;
+  function beginScanning() {
+    if (scheduled) return;
+    scheduled = true;
     state.active = true;
+    state.stopped = false;
     scheduleAll();
     // CMP JS API'lerini de birkaç kez dene (geç yüklenirler)
     for (const t of [0, 600, 1500, 3000, 6000, 10000]) {
       setTimeout(() => toPage({ type: 'try-api-optout' }), t);
     }
+  }
+
+  function start(settings) {
+    state.settings = Object.assign({}, CS.DEFAULTS, settings || {});
+    const active = CS.isActiveHost(state.settings, HOST);
+    // Konfig her durumda gönderilir: pasifken de göndermezsek page-agent
+    // "pending" modda kalır ve tamponladığı çerez yazımları kaybolur.
+    pushConfig(active);
+    if (!active) {
+      log('bu sitede koruma kapalı:', HOST);
+      return;
+    }
+    if (!state.settings.autoReject) return;
+    beginScanning();
   }
 
   try {
@@ -315,12 +316,24 @@
     start({});
   }
 
-  // Ayar değişince davranışı güncelle
+  // Ayar değişince davranışı güncelle: site o an açıldıysa sayfa yenilenmeden
+  // de reddetme turu başlar, kapatıldıysa müdahale durur.
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== 'local' || !state.settings) return;
       for (const [k, v] of Object.entries(changes)) state.settings[k] = v.newValue;
-      if (hostMatches(state.settings.disabledSites, HOST)) state.stopped = true;
+      const active = CS.isActiveHost(state.settings, HOST);
+      pushConfig(active);
+      if (!active) {
+        state.stopped = true;
+        state.active = false;
+        return;
+      }
+      if (state.settings.autoReject) {
+        state.handled.clear();
+        beginScanning();
+        pass('settings-changed');
+      }
     });
   } catch (_) { /* yoksay */ }
 

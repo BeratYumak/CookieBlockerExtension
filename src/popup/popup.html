@@ -18,17 +18,33 @@
     <section>
       <h2>Bu site</h2>
       <div class="host" id="host">—</div>
+      <div class="status" id="status">—</div>
+      <button id="activate" class="primary">Bu sitede korumayı aç</button>
       <div class="note" id="scope"></div>
       <div class="row"><span>Bu sayfada engellenen pop-up</span><span id="tabActions">0</span></div>
       <div class="row"><span>Sitede duran çerez</span><span id="cookieCount">—</span></div>
     </section>
 
     <section>
-      <h2>Çerez modu</h2>
+      <h2>Kapsam</h2>
+      <div class="modes" id="scopes">
+        <label class="mode">
+          <input type="radio" name="scope" value="sites" />
+          <span><b>Sadece açtığım siteler</b><small>Varsayılan: eklenti hiçbir yerde çalışmaz, tek tek sen açarsın.</small></span>
+        </label>
+        <label class="mode">
+          <input type="radio" name="scope" value="all" />
+          <span><b>Tüm siteler</b><small>Her sitede çalışır; istisnalar izin listesinden yönetilir.</small></span>
+        </label>
+      </div>
+    </section>
+
+    <section>
+      <h2>Çerez modu <span class="hint-inline">(açık sitelerde geçerli)</span></h2>
       <div class="modes" id="modes">
         <label class="mode">
           <input type="radio" name="mode" value="blockAll" />
-          <span><b>Tümünü engelle</b><small>Tüm sitelerde çerez yazımı/gönderimi engellenir (en katı).</small></span>
+          <span><b>Tümünü engelle</b><small>Çerez yazımı/gönderimi engellenir (en katı).</small></span>
         </label>
         <label class="mode">
           <input type="radio" name="mode" value="sessionOnly" />
@@ -48,10 +64,10 @@
     <section>
       <h2>Eylemler</h2>
       <div class="actions">
-        <button id="scan" class="primary">Bu sayfayı şimdi tara ve reddet</button>
-        <button id="allow">Bu sitede çerezlere izin ver</button>
-        <button id="disable">Bu sitede eklentiyi kapat</button>
+        <button id="scan">Bu sayfayı şimdi tara ve reddet</button>
         <button id="clear" class="warn">Bu sitenin çerezlerini sil</button>
+        <button id="allow" hidden>Bu sitede çerezlere izin ver</button>
+        <button id="disable" hidden>Bu sitede eklentiyi kapat</button>
       </div>
       <div class="note" id="note"></div>
     </section>

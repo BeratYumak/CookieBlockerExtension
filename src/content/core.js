@@ -10,6 +10,10 @@
   // ---------------------------------------------------------------- ayarlar
   const DEFAULTS = {
     enabled: true,
+    // Kapsam: 'sites' = yalnızca kullanıcının açtığı sitelerde çalış (varsayılan),
+    //         'all'   = her sitede çalış, izin listesi istisnadır (eski davranış).
+    scopeMode: 'sites',
+    enabledSites: [], // 'sites' kapsamında koruma açık olan siteler
     // 'blockAll' | 'thirdParty' | 'sessionOnly' | 'off'
     cookieMode: 'blockAll',
     autoReject: true, // CMP pop-up'larını otomatik reddet
@@ -17,8 +21,9 @@
     bypassCookieWalls: true, // scroll kilidi / blur / overlay temizliği
     hardBlockDocumentCookie: true, // document.cookie yazımını da engelle
     clearCookiesOnStartup: false,
-    allowlist: [], // bu hostlarda çerez engelleme uygulanmaz
-    disabledSites: [], // bu hostlarda eklenti tamamen pasif
+    reloadOnActivate: true, // siteyi etkinleştirince sekmeyi yenile
+    allowlist: [], // 'all' kapsamında çerez engellemesinden muaf hostlar
+    disabledSites: [], // 'all' kapsamında eklentinin tamamen pasif olduğu hostlar
     stats: { rejected: 0, hidden: 0, cookiesRemoved: 0 },
     debug: false
   };
@@ -611,6 +616,43 @@
     return current.filter((p) => p !== h && !p.endsWith('.' + h));
   }
 
+  // ------------------------------------------------------- etkinlik kararları
+  // Varsayılan duruş: eklenti hiçbir sitede kendiliğinden iş yapmaz.
+  // Kullanıcı bir sitede "korumayı aç" dediğinde o site (eTLD+1 + alt alan
+  // adları) `enabledSites` listesine girer ve yalnızca orada çalışır.
+
+  /** Eklenti bu hostta herhangi bir şey yapacak mı? (pop-up reddi dahil) */
+  function isActiveHost(settings, host) {
+    const s = settings || {};
+    if (!s.enabled) return false;
+    const h = normHost(host);
+    if (!h) return false;
+    if ((s.scopeMode || DEFAULTS.scopeMode) === 'sites') {
+      return hostMatches(s.enabledSites, h);
+    }
+    return !hostMatches(s.disabledSites, h);
+  }
+
+  /**
+   * Bu hostta geçerli olan çerez modu.
+   * Dönüş: 'blockAll' | 'thirdParty' | 'sessionOnly' | 'off'
+   * 'off' = çereze hiç dokunulmaz.
+   */
+  function cookieModeFor(settings, host) {
+    const s = settings || {};
+    if (!isActiveHost(s, host)) return 'off';
+    const mode = s.cookieMode || DEFAULTS.cookieMode;
+    if (mode === 'off') return 'off';
+    if ((s.scopeMode || DEFAULTS.scopeMode) === 'all' && hostMatches(s.allowlist, host)) return 'off';
+    return mode;
+  }
+
+  /** document.cookie yazımının hafızada tutulacağı (diske yazılmayacağı) durum. */
+  function isHardBlockedHost(settings, host) {
+    const s = settings || {};
+    return !!s.hardBlockDocumentCookie && cookieModeFor(s, host) === 'blockAll';
+  }
+
   globalThis.CookieShield = {
     DEFAULTS,
     norm,
@@ -618,6 +660,9 @@
     hostMatches,
     registrableDomain,
     toggleHostList,
+    isActiveHost,
+    cookieModeFor,
+    isHardBlockedHost,
     classify,
     labelOf,
     isVisible,

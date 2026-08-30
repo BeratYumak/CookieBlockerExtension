@@ -56,6 +56,22 @@ section h2 {
   margin-bottom: 4px;
 }
 
+.status {
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.status.on { color: #7ee2a8; }
+.status.off { color: var(--muted); }
+
+.hint-inline {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+
+#activate { width: 100%; text-align: center; margin-bottom: 8px; }
+
 .row {
   display: flex;
   justify-content: space-between;

@@ -78,6 +78,13 @@ async function run(withExt) {
     }
     if (!t) throw new Error('eklenti service worker yüklenmedi');
     worker = await t.worker();
+    // Varsayılan olarak eklenti hiçbir sitede çalışmaz: ölçülecek siteyi aç.
+    const site = await worker.evaluate(async (h) => {
+      const s = self.CookieShield.registrableDomain(h);
+      await chrome.storage.local.set({ enabledSites: [s], enabled: true, scopeMode: 'sites' });
+      return s;
+    }, HOST);
+    console.log(`  (eklenti şu site için açıldı: ${site})`);
     await sleep(1500); // kurallar devreye girsin
   }
 

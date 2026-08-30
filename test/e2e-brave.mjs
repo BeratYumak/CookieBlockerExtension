@@ -1,12 +1,12 @@
 /**
  * Cookie Shield - gerçek Brave üzerinde uçtan uca test.
  * Eklentiyi yükler, yerel bir test sunucusu açar ve şunları doğrular:
- *  1) Bilinen CMP'nin "Reddet" butonuna otomatik basılır (kabul edilmez)
- *  2) CMP JS API'si (OneTrust.RejectAll) çağrılır
- *  3) Sunucunun Set-Cookie'si engellenir, sonraki istekte çerez gitmez
- *  4) document.cookie sanal kavanozda kalır (sayfa çalışır, sunucuya gitmez)
- *  5) Çerez duvarı: kaydırma kilidi açılır, banner gizlenir
- *  6) İzin listesindeki site için çerezler yeniden çalışır
+ *  A) Varsayılan durumda hiçbir müdahale yok (banner tıklanmaz, çerez çalışır)
+ *  B) Sayfa açıkken siteyi etkinleştirmek reddetmeyi anında tetikler
+ *  C) Etkin sitede: CMP API reddi, Set-Cookie engeli, sanal kavanoz, çerez duvarı
+ *  D) Siteyi kapatınca çerezler yeniden çalışır
+ *  E) Etkinleştirme kapsamı site geneli (eTLD+1 + alt alan adları), sızmaz
+ *  F) "Tüm siteler" kapsamı ve izin listesi (eski davranış) hâlâ çalışır
  */
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
@@ -27,6 +27,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const PAGES = {
   '/consent-dom': `<!DOCTYPE html><html lang="tr"><body>
+    <script>window.__marker = 'ilk-yukleme';</script>
     <main><h1>DOM testi</h1><p>Sayfa içeriği.</p></main>
     <div id="onetrust-consent-sdk">
       <div id="onetrust-banner-sdk" style="position:fixed;bottom:0;left:0;right:0;z-index:9999;background:#eee;padding:20px">
@@ -71,7 +72,7 @@ function startServer() {
     seen.push({ url: req.url, cookie: req.headers.cookie || null });
     if (req.url.startsWith('/echo')) {
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      res.end(JSON.stringify({ cookie: req.headers.cookie || null }));
+      res.end(JSON.stringify({ cookie: req.headers.cookie || null, gpc: req.headers['sec-gpc'] || null }));
       return;
     }
     if (req.url.startsWith('/setcookie')) {
@@ -98,7 +99,7 @@ function startServer() {
 }
 
 async function main() {
-  const { server, port, seen } = await startServer();
+  const { server, port } = await startServer();
   const base = `http://localhost:${port}`;
   const profile = mkdtempSync(join(tmpdir(), 'cs-e2e-'));
   let browser;
@@ -130,8 +131,10 @@ async function main() {
     }
     check('eklenti servis çalışanı yüklendi', !!swTarget, swTarget ? swTarget.url().slice(0, 45) + '…' : 'bulunamadı');
     const worker = swTarget ? await swTarget.worker() : null;
+    if (!worker) throw new Error('servis çalışanı yok, devam edilemiyor');
+
     const DEBUG = !!process.env.CS_DEBUG;
-    if (worker && DEBUG) {
+    if (DEBUG) {
       await worker.evaluate(async () => {
         await chrome.storage.local.set({ debug: true });
       });
@@ -142,36 +145,104 @@ async function main() {
       return p;
     };
 
-    if (worker) {
-      const state = await worker.evaluate(async () => {
-        const s = await chrome.storage.local.get(null);
-        const sets = await chrome.declarativeNetRequest.getEnabledRulesets();
-        return { mode: s.cookieMode, enabled: s.enabled, sets };
-      });
-      check(
-        'varsayılan mod ve kural setleri aktif',
-        state.enabled === true && state.mode === 'blockAll' && state.sets.includes('block-all-cookies'),
-        `mod=${state.mode} setler=${state.sets.join(',')}`
+    /** Siteyi aç/kapat (tabId verilmezse sekme yenilenmez). */
+    const setSite = (host, on, tabId) =>
+      worker.evaluate(
+        async (h, o, t) => {
+          const r = await self.CookieShieldSW.setSiteActive(h, o, t);
+          return { ok: r.ok, site: r.site, removed: r.removed, reloaded: r.reloaded };
+        },
+        host,
+        on,
+        tabId == null ? null : tabId
       );
-    }
 
-    // 1) DOM üzerinden gerçek reddet tıklaması
+    const ruleSummary = () =>
+      worker.evaluate(async () => {
+        const s = await chrome.storage.local.get(null);
+        return {
+          scopeMode: s.scopeMode,
+          enabled: s.enabled,
+          enabledSites: s.enabledSites,
+          cookieMode: s.cookieMode,
+          sets: await chrome.declarativeNetRequest.getEnabledRulesets(),
+          dynamic: (await chrome.declarativeNetRequest.getDynamicRules()).length
+        };
+      });
+
+    const cookieOn = async (host, tag) => {
+      const p = hookConsole(await browser.newPage());
+      await p.goto(`http://${host}:${port}/setcookie`, { waitUntil: 'domcontentloaded' });
+      await sleep(400);
+      const echo = await p.evaluate(async (u) => {
+        const r = await fetch(u, { cache: 'no-store' });
+        return r.json();
+      }, `http://${host}:${port}/echo?${tag}`);
+      await p.close();
+      return echo;
+    };
+
+    // ------------------------------------------------- A) varsayılan: hiç müdahale yok
+    const fresh = await ruleSummary();
+    check(
+      'varsayılan kapsam site bazlı ve hiç kural yazılmamış',
+      fresh.scopeMode === 'sites' &&
+        Array.isArray(fresh.enabledSites) && fresh.enabledSites.length === 0 &&
+        fresh.sets.length === 0 && fresh.dynamic === 0,
+      `kapsam=${fresh.scopeMode} setler=[${fresh.sets.join(',')}] dinamik=${fresh.dynamic}`
+    );
+
     let page = hookConsole(await browser.newPage());
     await page.goto(base + '/consent-dom', { waitUntil: 'domcontentloaded' });
     await sleep(2500);
-    const domRes = await page.evaluate(() => ({
+    const passive = await page.evaluate(() => ({
       result: window.__result || null,
-      bannerVisible: (() => {
-        const el = document.getElementById('onetrust-banner-sdk');
-        if (!el) return false;
-        const cs = getComputedStyle(el);
-        return cs.display !== 'none' && cs.visibility !== 'hidden';
-      })()
+      bannerVisible: getComputedStyle(document.getElementById('onetrust-banner-sdk')).display !== 'none'
     }));
-    check('DOM: "Reject All" otomatik tıklandı (kabul edilmedi)', domRes.result === 'reject', `sonuç=${domRes.result}`);
+    check(
+      'varsayılanda banner\'a dokunulmuyor (ne reddet ne gizle)',
+      passive.result === null && passive.bannerVisible === true,
+      `sonuç=${passive.result} banner=${passive.bannerVisible}`
+    );
+
+    // Tarayıcının kendi davranışı: Brave zaten Sec-GPC gönderebilir; kıyas için ölç.
+    const baseline = await cookieOn('localhost', 'baseline');
+    check(
+      'varsayılanda çerezler normal çalışıyor (müdahale yok)',
+      /srv=1/.test(baseline.cookie || ''),
+      `cookie=${baseline.cookie} sec-gpc=${baseline.gpc}`
+    );
+
+    // B) Sayfa açıkken siteyi etkinleştir -> reddetme anında tetiklenmeli
+    const act = await setSite('localhost', true);
+    check('site etkinleştirildi', act.ok && act.site === 'localhost', `site=${act.site}`);
+    await sleep(2500);
+    const live = await page.evaluate(() => ({
+      result: window.__result || null,
+      marker: window.__marker || null
+    }));
+    check(
+      'etkinleştirme açık sayfada reddetmeyi tetikledi (yenilemeye gerek yok)',
+      live.result === 'reject' && live.marker === 'ilk-yukleme',
+      `sonuç=${live.result}`
+    );
     await page.close();
 
-    // 2) CMP JS API ile reddetme
+    const afterActivate = await ruleSummary();
+    check(
+      'sadece bu site için dinamik kural yazıldı, global set açılmadı',
+      afterActivate.sets.length === 0 && afterActivate.dynamic >= 6,
+      `setler=[${afterActivate.sets.join(',')}] dinamik=${afterActivate.dynamic}`
+    );
+
+    // ---------------------------------------- C) etkin sitede tüm koruma katmanları
+    page = hookConsole(await browser.newPage());
+    await page.goto(base + '/consent-dom', { waitUntil: 'domcontentloaded' });
+    await sleep(2500);
+    const domRes = await page.evaluate(() => window.__result || null);
+    check('DOM: "Reject All" otomatik tıklandı (kabul edilmedi)', domRes === 'reject', `sonuç=${domRes}`);
+    await page.close();
+
     page = hookConsole(await browser.newPage());
     await page.goto(base + '/consent-api', { waitUntil: 'domcontentloaded' });
     await sleep(2500);
@@ -184,22 +255,14 @@ async function main() {
     check('GPC sinyali sayfaya enjekte edildi', apiRes.gpc === true && apiRes.dnt === '1', `gpc=${apiRes.gpc} dnt=${apiRes.dnt}`);
     await page.close();
 
-    // 3) Sunucu çerezi engellendi mi?
-    page = hookConsole(await browser.newPage());
-    await page.goto(base + '/setcookie', { waitUntil: 'domcontentloaded' });
-    await sleep(500);
-    const echo1 = await page.evaluate(async (b) => {
-      const r = await fetch(b + '/echo?first', { cache: 'no-store' });
-      return r.json();
-    }, base);
-    const cookiesInStore = worker
-      ? await worker.evaluate(async () => (await chrome.cookies.getAll({})).map((c) => c.name + '@' + c.domain))
-      : [];
-    check('Set-Cookie engellendi (sonraki istekte çerez yok)', !echo1.cookie, `cookie=${echo1.cookie}`);
+    const echoActive = await cookieOn('localhost', 'active');
+    const cookiesInStore = await worker.evaluate(async () =>
+      (await chrome.cookies.getAll({})).map((c) => c.name + '@' + c.domain)
+    );
+    check('Set-Cookie engellendi (sonraki istekte çerez yok)', !echoActive.cookie, `cookie=${echoActive.cookie}`);
+    check('istekte Sec-GPC gönderildi', echoActive.gpc === '1', `sec-gpc=${echoActive.gpc}`);
     check('çerez deposu temiz', cookiesInStore.length === 0, cookiesInStore.join(', ') || 'boş');
-    await page.close();
 
-    // 4) document.cookie sanal kavanoz
     page = hookConsole(await browser.newPage());
     await page.goto(base + '/jar', { waitUntil: 'domcontentloaded' });
     await sleep(400);
@@ -216,7 +279,6 @@ async function main() {
     check('sanal çerez sunucuya gönderilmez', !jar.sent, `gönderilen=${jar.sent}`);
     await page.close();
 
-    // 5) Çerez duvarı
     page = hookConsole(await browser.newPage());
     await page.goto(base + '/wall', { waitUntil: 'domcontentloaded' });
     await sleep(3000);
@@ -238,107 +300,132 @@ async function main() {
     check('kabul butonuna basılmadı', wall.clicked === null, `tıklanan=${wall.clicked}`);
     await page.close();
 
-    // 6) İzin listesi: çerezler geri çalışmalı
-    if (worker) {
-      await worker.evaluate(async () => {
-        await chrome.storage.local.set({ allowlist: ['localhost'] });
-      });
-      await sleep(1500);
-      const dyn = await worker.evaluate(async () => {
-        const rules = await chrome.declarativeNetRequest.getDynamicRules();
-        return rules.map((r) => `${r.id}:${JSON.stringify(r.condition.requestDomains || r.condition.initiatorDomains)}`);
-      });
-      check('izin listesi için dinamik allow kuralı yazıldı', dyn.length >= 2, dyn.join(' '));
-      page = hookConsole(await browser.newPage());
-      await page.goto(base + '/setcookie', { waitUntil: 'domcontentloaded' });
-      await sleep(400);
-      const echo2 = await page.evaluate(async (b) => {
-        const r = await fetch(b + '/echo?allow', { cache: 'no-store' });
-        return r.json();
-      }, base);
-      check('izin listesindeki sitede çerez çalışıyor', /srv=1/.test(echo2.cookie || ''), `cookie=${echo2.cookie}`);
-      await page.close();
-      await worker.evaluate(async () => {
-        await chrome.storage.local.set({ allowlist: [] });
-      });
-    }
+    // Etkinleştirmede sekme yenileme (reloadOnActivate)
+    await setSite('localhost', false);
+    await sleep(800);
+    page = hookConsole(await browser.newPage());
+    await page.goto(base + '/consent-dom', { waitUntil: 'domcontentloaded' });
+    await page.bringToFront();
+    await sleep(600);
+    const tabId = await worker.evaluate(async () => (await self.CookieShieldSW.buildState()).tabId);
+    const reload = await setSite('localhost', true, tabId);
+    await sleep(2500);
+    const afterReload = await page.evaluate(() => ({
+      marker: window.__marker || null,
+      result: window.__result || null
+    }));
+    check(
+      'sekme yenilendi ve yeniden yüklenen sayfada da reddedildi',
+      reload.reloaded === true && afterReload.result === 'reject',
+      `yenilendi=${reload.reloaded} sonuç=${afterReload.result} marker=${afterReload.marker}`
+    );
+    await page.close();
 
-    // 6b) İzin kapsamı: alt alan adındayken verilen izin site genelini kapsar
-    if (worker) {
-      const H = (host, path) => `http://${host}:${port}${path}`;
-      const cookieOn = async (host, tag) => {
-        const p = hookConsole(await browser.newPage());
-        await p.goto(H(host, '/setcookie'), { waitUntil: 'domcontentloaded' });
-        await sleep(400);
-        const echo = await p.evaluate(async (u) => {
-          const r = await fetch(u, { cache: 'no-store' });
-          return r.json();
-        }, H(host, '/echo?' + tag));
-        await p.close();
-        return echo.cookie || null;
-      };
+    // -------------------------------------------- D) siteyi kapatınca engel kalkmalı
+    const off = await setSite('localhost', false);
+    await sleep(1200);
+    const afterOff = await ruleSummary();
+    const echoOff = await cookieOn('localhost', 'off');
+    check(
+      'site kapatılınca dinamik kurallar silindi',
+      afterOff.dynamic === 0 && afterOff.enabledSites.length === 0,
+      `dinamik=${afterOff.dynamic} liste=${JSON.stringify(afterOff.enabledSites)}`
+    );
+    check('kapalı sitede çerezler yeniden çalışıyor', /srv=1/.test(echoOff.cookie || ''), `cookie=${echoOff.cookie}`);
+    check(
+      'kapalı sitede GPC tarayıcı varsayılanına döndü',
+      (echoOff.gpc || null) === (baseline.gpc || null),
+      `kapalı=${echoOff.gpc} varsayılan=${baseline.gpc}`
+    );
+    void off;
 
-      // Alt alan adındaki bir "derin" adreste popup ne görüyor?
-      const deep = hookConsole(await browser.newPage());
-      await deep.goto(H('gist.cs-test.com', '/plain?a/b/c'), { waitUntil: 'domcontentloaded' });
-      await deep.bringToFront();
-      await sleep(400);
-      const st = await worker.evaluate(async () => {
-        const s = await self.CookieShieldSW.buildState();
-        return { host: s.host, site: s.site };
-      });
-      check(
-        'derin adreste eylem kapsamı site geneli (yol değil)',
-        st.host === 'gist.cs-test.com' && st.site === 'cs-test.com',
-        `host=${st.host} site=${st.site}`
-      );
+    // --------------------------------- E) kapsam: alt alan adında açmak siteyi kapsar
+    const deep = hookConsole(await browser.newPage());
+    await deep.goto(`http://gist.cs-test.com:${port}/plain?a/b/c`, { waitUntil: 'domcontentloaded' });
+    await deep.bringToFront();
+    await sleep(500);
+    const st = await worker.evaluate(async () => {
+      const s = await self.CookieShieldSW.buildState();
+      return { host: s.host, site: s.site, siteActive: s.siteActive };
+    });
+    check(
+      'derin adreste eylem kapsamı site geneli (yol değil)',
+      st.host === 'gist.cs-test.com' && st.site === 'cs-test.com' && st.siteActive === false,
+      `host=${st.host} site=${st.site} aktif=${st.siteActive}`
+    );
 
-      // Popup'ın yazacağı kayıt: site kapsamı
-      await worker.evaluate(async (site) => {
-        const list = self.CookieShield.toggleHostList([], site, true);
-        await chrome.storage.local.set({ allowlist: list });
-      }, st.site);
-      await sleep(1500);
-      const listed = await worker.evaluate(async () => (await chrome.storage.local.get('allowlist')).allowlist);
-      check('izin kaydı site olarak yazıldı', listed.length === 1 && listed[0] === 'cs-test.com', listed.join(','));
+    const deepAct = await setSite(st.host, true);
+    await sleep(1200);
+    const listed = await worker.evaluate(async () => (await chrome.storage.local.get('enabledSites')).enabledSites);
+    check('etkinleştirme kaydı site olarak yazıldı', listed.length === 1 && listed[0] === 'cs-test.com', listed.join(','));
+    void deepAct;
 
-      const cSub = await cookieOn('gist.cs-test.com', 'sub');
-      const cRoot = await cookieOn('cs-test.com', 'root');
-      const cWww = await cookieOn('www.cs-test.com', 'www');
-      const cOther = await cookieOn('baska-cs-test.com', 'other');
-      check('izin alt alan adında çalışıyor (gist.cs-test.com)', /srv=1/.test(cSub || ''), `cookie=${cSub}`);
-      check('izin ana alan adında da çalışıyor (cs-test.com)', /srv=1/.test(cRoot || ''), `cookie=${cRoot}`);
-      check('izin www alt alan adında da çalışıyor', /srv=1/.test(cWww || ''), `cookie=${cWww}`);
-      check('izin başka siteye sızmıyor', !cOther, `cookie=${cOther}`);
+    const cSub = await cookieOn('gist.cs-test.com', 'sub');
+    const cRoot = await cookieOn('cs-test.com', 'root');
+    const cWww = await cookieOn('www.cs-test.com', 'www');
+    const cOther = await cookieOn('baska-cs-test.com', 'other');
+    check('engel alt alan adında çalışıyor (gist.cs-test.com)', !cSub.cookie, `cookie=${cSub.cookie}`);
+    check('engel ana alan adında da çalışıyor (cs-test.com)', !cRoot.cookie, `cookie=${cRoot.cookie}`);
+    check('engel www alt alan adında da çalışıyor', !cWww.cookie, `cookie=${cWww.cookie}`);
+    check('engel başka siteye sızmıyor', /srv=1/.test(cOther.cookie || ''), `cookie=${cOther.cookie}`);
 
-      // Kaldırma: dar kayıtlar da temizlenir, engelleme geri döner
-      await worker.evaluate(async () => {
-        const cur = (await chrome.storage.local.get('allowlist')).allowlist || [];
-        const list = self.CookieShield.toggleHostList(cur.concat(['gist.cs-test.com']), 'cs-test.com', false);
-        await chrome.storage.local.set({ allowlist: list });
-        // İzinli aşamada yazılan çerezleri temizle
-        for (const c of await chrome.cookies.getAll({})) {
-          const d = String(c.domain || '').replace(/^\./, '');
-          await chrome.cookies.remove({
+    // Kapatma: dar kayıtlar da temizlenir
+    await worker.evaluate(async () => {
+      const cur = (await chrome.storage.local.get('enabledSites')).enabledSites || [];
+      await chrome.storage.local.set({ enabledSites: cur.concat(['gist.cs-test.com']) });
+    });
+    await setSite('cs-test.com', false);
+    await sleep(1200);
+    const after = await worker.evaluate(async () => (await chrome.storage.local.get('enabledSites')).enabledSites);
+    check('kapatınca alt alan kayıtları da silindi', after.length === 0, JSON.stringify(after));
+    const cBack = await cookieOn('gist.cs-test.com', 'back');
+    check('kapatıldıktan sonra çerez yeniden çalışıyor', /srv=1/.test(cBack.cookie || ''), `cookie=${cBack.cookie}`);
+    await deep.close();
+
+    // ------------------------------- F) "tüm siteler" kapsamı + izin listesi (eski mod)
+    await worker.evaluate(async () => {
+      for (const c of await chrome.cookies.getAll({})) {
+        const d = String(c.domain || '').replace(/^\./, '');
+        await chrome.cookies
+          .remove({
             url: (c.secure ? 'https://' : 'http://') + d + (c.path || '/'),
             name: c.name,
             storeId: c.storeId,
             partitionKey: c.partitionKey
-          }).catch(() => {});
-        }
-      });
-      await sleep(1500);
-      const after = await worker.evaluate(async () => (await chrome.storage.local.get('allowlist')).allowlist);
-      check('izin kaldırılınca alt alan kayıtları da silindi', after.length === 0, JSON.stringify(after));
-      const cBlocked = await cookieOn('gist.cs-test.com', 'blocked');
-      check('izin kaldırıldıktan sonra çerez yine engelli', !cBlocked, `cookie=${cBlocked}`);
-      await deep.close();
-      await worker.evaluate(async () => {
-        await chrome.storage.local.set({ allowlist: [] });
-      });
-    }
+          })
+          .catch(() => {});
+      }
+      await chrome.storage.local.set({ scopeMode: 'all', allowlist: [] });
+    });
+    await sleep(1500);
+    const allMode = await ruleSummary();
+    const echoAll = await cookieOn('baska-cs-test.com', 'allmode');
+    check(
+      '"tüm siteler" kapsamında global kural setleri açıldı',
+      allMode.sets.includes('block-all-cookies') && allMode.sets.includes('privacy-signals'),
+      `setler=[${allMode.sets.join(',')}]`
+    );
+    check('"tüm siteler" kapsamında her sitede çerez engelli', !echoAll.cookie, `cookie=${echoAll.cookie}`);
 
-    // 7) Eklenti arayüzleri hatasız açılıyor mu?
+    await worker.evaluate(async () => {
+      await chrome.storage.local.set({ allowlist: ['cs-test.com'] });
+    });
+    await sleep(1500);
+    const echoAllow = await cookieOn('gist.cs-test.com', 'allow');
+    check('izin listesindeki sitede çerez çalışıyor', /srv=1/.test(echoAllow.cookie || ''), `cookie=${echoAllow.cookie}`);
+
+    await worker.evaluate(async () => {
+      await chrome.storage.local.set({ scopeMode: 'sites', allowlist: [], enabledSites: [] });
+    });
+    await sleep(1200);
+    const backToSites = await ruleSummary();
+    check(
+      'site kapsamına dönünce global kurallar kapandı',
+      backToSites.sets.length === 0 && backToSites.dynamic === 0,
+      `setler=[${backToSites.sets.join(',')}] dinamik=${backToSites.dynamic}`
+    );
+
+    // ------------------------------------------------- G) arayüzler hatasız açılıyor mu
     if (swTarget) {
       const extId = new URL(swTarget.url()).host;
       for (const [label, path] of [
@@ -363,11 +450,9 @@ async function main() {
       }
     }
 
-    // 8) İstatistikler
-    if (worker) {
-      const stats = await worker.evaluate(async () => (await chrome.storage.local.get('stats')).stats);
-      check('istatistikler kaydedildi', (stats.rejected || 0) + (stats.hidden || 0) > 0, JSON.stringify(stats));
-    }
+    // H) İstatistikler
+    const stats = await worker.evaluate(async () => (await chrome.storage.local.get('stats')).stats);
+    check('istatistikler kaydedildi', (stats.rejected || 0) + (stats.hidden || 0) > 0, JSON.stringify(stats));
   } catch (e) {
     check('beklenmeyen hata', false, String(e && e.stack ? e.stack.split('\n')[0] : e));
   } finally {
