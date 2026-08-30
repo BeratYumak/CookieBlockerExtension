@@ -535,21 +535,89 @@
     return fixes;
   }
 
+  function normHost(host) {
+    return String(host || '')
+      .toLowerCase()
+      .trim()
+      .replace(/^\.+/, '')
+      .replace(/\.+$/, '')
+      .replace(/^www\./, '');
+  }
+
   function hostMatches(list, host) {
     if (!Array.isArray(list)) return false;
-    const h = String(host || '').toLowerCase().replace(/^\./, '').replace(/^www\./, '');
+    const h = normHost(host);
     if (!h) return false;
     return list.some((raw) => {
-      const p = String(raw || '').toLowerCase().trim().replace(/^\./, '').replace(/^www\./, '');
+      const p = normHost(raw);
       if (!p) return false;
       return h === p || h.endsWith('.' + p);
     });
   }
 
+  // ------------------------------------------------------------- site kapsamı
+  // "Bu sitede izin ver" gibi eylemler tek bir alt alan adına değil, sitenin
+  // tamamına uygulanmalı: gist.github.com'da izin verildiğinde github.com'daki
+  // oturum çerezi de korunmalı. Bunun için kayıtlanabilir alan adını (eTLD+1)
+  // buluruz. Tam bir Public Suffix List taşımak yerine iki katmanlı sezgi:
+  // 2 harfli ülke TLD'leri altındaki bilinen ikinci seviye etiketler + yaygın
+  // barındırma sonekleri.
+  const SLD_LABELS = new Set([
+    'com', 'net', 'org', 'edu', 'gov', 'mil', 'int', 'biz', 'info', 'name', 'pro',
+    'co', 'ac', 'or', 'ne', 'go', 'lg', 're', 'pe', 'gen', 'web', 'sch', 'k12',
+    'firm', 'res', 'govt', 'bel', 'av', 'tsk', 'pol', 'tv', 'nom', 'in', 'id',
+    'me', 'ltd', 'plc', 'asn', 'org', 'gob', 'gouv', 'priv'
+  ]);
+
+  // Alt alan adları farklı sahiplere ait olan sonekler: bunları site sınırı say.
+  const PUBLIC_HOSTING_SUFFIXES = new Set([
+    'github.io', 'gitlab.io', 'blogspot.com', 'wordpress.com', 'pages.dev',
+    'workers.dev', 'vercel.app', 'netlify.app', 'herokuapp.com', 'firebaseapp.com',
+    'web.app', 'appspot.com', 'glitch.me', 'surge.sh', 'onrender.com', 'fly.dev',
+    'azurewebsites.net', 'cloudfront.net', 's3.amazonaws.com', 'amazonaws.com',
+    'sharepoint.com', 'myshopify.com', 'notion.site', 'replit.dev', 'ngrok.io',
+    'ngrok-free.app', 'trycloudflare.com', 'localhost'
+  ]);
+
+  /** ornek: gist.github.com -> github.com, a.b.sirket.com.tr -> sirket.com.tr */
+  function registrableDomain(host) {
+    const h = normHost(host);
+    if (!h) return '';
+    // IPv4 / IPv6 / tek etiketli host (localhost gibi): olduğu gibi kalsın
+    if (h.includes(':') || /^\d{1,3}(\.\d{1,3}){3}$/.test(h)) return h;
+    const parts = h.split('.').filter(Boolean);
+    if (parts.length <= 2) return parts.join('.');
+
+    const take = (n) => parts.slice(-n).join('.');
+    const tld = parts[parts.length - 1];
+    const sld = parts[parts.length - 2];
+
+    if (parts.length >= 4 && PUBLIC_HOSTING_SUFFIXES.has(take(3))) return take(4);
+    if (PUBLIC_HOSTING_SUFFIXES.has(take(2))) return take(3);
+    if (tld.length === 2 && SLD_LABELS.has(sld)) return take(3);
+    return take(2);
+  }
+
+  /**
+   * İzin/kapatma listelerinde ekleme-çıkarma. Çıkarırken verilen kapsamın
+   * altındaki daha dar kayıtları da temizler; yoksa eski sürümden kalan
+   * "gist.github.com" gibi bir kayıt yüzünden düğme kapanmıyor gibi görünür.
+   */
+  function toggleHostList(list, host, on) {
+    const h = normHost(host);
+    const current = (Array.isArray(list) ? list : []).map(normHost).filter(Boolean);
+    if (!h) return Array.from(new Set(current));
+    if (on) return Array.from(new Set(current.concat([h])));
+    return current.filter((p) => p !== h && !p.endsWith('.' + h));
+  }
+
   globalThis.CookieShield = {
     DEFAULTS,
     norm,
+    normHost,
     hostMatches,
+    registrableDomain,
+    toggleHostList,
     classify,
     labelOf,
     isVisible,

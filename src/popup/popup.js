@@ -5,6 +5,7 @@ const send = (msg) => chrome.runtime.sendMessage(msg);
 
 let S = null;
 let HOST = null;
+let SITE = null;
 let TAB_ID = null;
 
 function toast(text) {
@@ -15,11 +16,15 @@ function toast(text) {
 function render(state) {
   S = state.settings;
   HOST = state.host;
+  SITE = state.site;
   TAB_ID = state.tabId;
 
   $('enabled').checked = !!S.enabled;
   $('enabledLabel').textContent = S.enabled ? 'Açık' : 'Kapalı';
   $('host').textContent = HOST || 'tarayıcı sayfası';
+  $('scope').textContent = SITE
+    ? `Eylem kapsamı: ${SITE} ve tüm alt alan adları (adres yolu önemsiz)`
+    : '';
   $('tabActions').textContent = String(state.tabActions || 0);
   $('cookieCount').textContent = state.cookieCount == null ? '—' : String(state.cookieCount);
 
@@ -27,14 +32,17 @@ function render(state) {
     el.checked = el.value === S.cookieMode;
   }
 
+  const scope = SITE || 'bu site';
   const allow = $('allow');
   allow.textContent = state.allowlisted
-    ? 'Çerez izni açık — kaldır'
-    : 'Bu sitede çerezlere izin ver';
+    ? `Çerez izni açık (${scope}) — kaldır`
+    : `${scope} için çerezlere izin ver`;
   allow.classList.toggle('on', !!state.allowlisted);
 
   const dis = $('disable');
-  dis.textContent = state.siteDisabled ? 'Eklenti kapalı — tekrar aç' : 'Bu sitede eklentiyi kapat';
+  dis.textContent = state.siteDisabled
+    ? `Eklenti kapalı (${scope}) — tekrar aç`
+    : `${scope} için eklentiyi kapat`;
   dis.classList.toggle('on', !!state.siteDisabled);
 
   const st = S.stats || {};
@@ -46,7 +54,7 @@ function render(state) {
       ? 'Katı mod: giriş yaptığın siteler için "çerezlere izin ver" kullan.'
       : '';
 
-  const noHost = !HOST;
+  const noHost = !SITE;
   for (const id of ['allow', 'disable', 'clear', 'scan']) $(id).disabled = noHost;
 }
 
@@ -71,20 +79,20 @@ for (const el of document.querySelectorAll('input[name="mode"]')) {
 
 $('allow').addEventListener('click', async () => {
   const state = await send({ type: 'cs:get-state' });
-  await send({ type: 'cs:toggle-list', list: 'allowlist', host: HOST, on: !state.allowlisted });
+  await send({ type: 'cs:toggle-list', list: 'allowlist', host: SITE, on: !state.allowlisted });
   await refresh();
-  toast('Güncellendi. Sayfayı yenile.');
+  toast(`${SITE} güncellendi. Sayfayı yenile.`);
 });
 
 $('disable').addEventListener('click', async () => {
   const state = await send({ type: 'cs:get-state' });
-  await send({ type: 'cs:toggle-list', list: 'disabledSites', host: HOST, on: !state.siteDisabled });
+  await send({ type: 'cs:toggle-list', list: 'disabledSites', host: SITE, on: !state.siteDisabled });
   await refresh();
-  toast('Güncellendi. Sayfayı yenile.');
+  toast(`${SITE} güncellendi. Sayfayı yenile.`);
 });
 
 $('clear').addEventListener('click', async () => {
-  const res = await send({ type: 'cs:clear-cookies', host: HOST });
+  const res = await send({ type: 'cs:clear-cookies', host: SITE });
   await refresh();
   toast(`${(res && res.removed) || 0} çerez silindi`);
 });

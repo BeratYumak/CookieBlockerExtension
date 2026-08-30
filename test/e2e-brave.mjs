@@ -116,7 +116,7 @@ async function main() {
         '--no-default-browser-check',
         '--disable-brave-update',
         '--disable-sync',
-        '--host-resolver-rules=MAP localhost 127.0.0.1'
+        '--host-resolver-rules=MAP * 127.0.0.1'
       ]
     });
 
@@ -258,6 +258,81 @@ async function main() {
       }, base);
       check('izin listesindeki sitede çerez çalışıyor', /srv=1/.test(echo2.cookie || ''), `cookie=${echo2.cookie}`);
       await page.close();
+      await worker.evaluate(async () => {
+        await chrome.storage.local.set({ allowlist: [] });
+      });
+    }
+
+    // 6b) İzin kapsamı: alt alan adındayken verilen izin site genelini kapsar
+    if (worker) {
+      const H = (host, path) => `http://${host}:${port}${path}`;
+      const cookieOn = async (host, tag) => {
+        const p = hookConsole(await browser.newPage());
+        await p.goto(H(host, '/setcookie'), { waitUntil: 'domcontentloaded' });
+        await sleep(400);
+        const echo = await p.evaluate(async (u) => {
+          const r = await fetch(u, { cache: 'no-store' });
+          return r.json();
+        }, H(host, '/echo?' + tag));
+        await p.close();
+        return echo.cookie || null;
+      };
+
+      // Alt alan adındaki bir "derin" adreste popup ne görüyor?
+      const deep = hookConsole(await browser.newPage());
+      await deep.goto(H('gist.cs-test.com', '/plain?a/b/c'), { waitUntil: 'domcontentloaded' });
+      await deep.bringToFront();
+      await sleep(400);
+      const st = await worker.evaluate(async () => {
+        const s = await self.CookieShieldSW.buildState();
+        return { host: s.host, site: s.site };
+      });
+      check(
+        'derin adreste eylem kapsamı site geneli (yol değil)',
+        st.host === 'gist.cs-test.com' && st.site === 'cs-test.com',
+        `host=${st.host} site=${st.site}`
+      );
+
+      // Popup'ın yazacağı kayıt: site kapsamı
+      await worker.evaluate(async (site) => {
+        const list = self.CookieShield.toggleHostList([], site, true);
+        await chrome.storage.local.set({ allowlist: list });
+      }, st.site);
+      await sleep(1500);
+      const listed = await worker.evaluate(async () => (await chrome.storage.local.get('allowlist')).allowlist);
+      check('izin kaydı site olarak yazıldı', listed.length === 1 && listed[0] === 'cs-test.com', listed.join(','));
+
+      const cSub = await cookieOn('gist.cs-test.com', 'sub');
+      const cRoot = await cookieOn('cs-test.com', 'root');
+      const cWww = await cookieOn('www.cs-test.com', 'www');
+      const cOther = await cookieOn('baska-cs-test.com', 'other');
+      check('izin alt alan adında çalışıyor (gist.cs-test.com)', /srv=1/.test(cSub || ''), `cookie=${cSub}`);
+      check('izin ana alan adında da çalışıyor (cs-test.com)', /srv=1/.test(cRoot || ''), `cookie=${cRoot}`);
+      check('izin www alt alan adında da çalışıyor', /srv=1/.test(cWww || ''), `cookie=${cWww}`);
+      check('izin başka siteye sızmıyor', !cOther, `cookie=${cOther}`);
+
+      // Kaldırma: dar kayıtlar da temizlenir, engelleme geri döner
+      await worker.evaluate(async () => {
+        const cur = (await chrome.storage.local.get('allowlist')).allowlist || [];
+        const list = self.CookieShield.toggleHostList(cur.concat(['gist.cs-test.com']), 'cs-test.com', false);
+        await chrome.storage.local.set({ allowlist: list });
+        // İzinli aşamada yazılan çerezleri temizle
+        for (const c of await chrome.cookies.getAll({})) {
+          const d = String(c.domain || '').replace(/^\./, '');
+          await chrome.cookies.remove({
+            url: (c.secure ? 'https://' : 'http://') + d + (c.path || '/'),
+            name: c.name,
+            storeId: c.storeId,
+            partitionKey: c.partitionKey
+          }).catch(() => {});
+        }
+      });
+      await sleep(1500);
+      const after = await worker.evaluate(async () => (await chrome.storage.local.get('allowlist')).allowlist);
+      check('izin kaldırılınca alt alan kayıtları da silindi', after.length === 0, JSON.stringify(after));
+      const cBlocked = await cookieOn('gist.cs-test.com', 'blocked');
+      check('izin kaldırıldıktan sonra çerez yine engelli', !cBlocked, `cookie=${cBlocked}`);
+      await deep.close();
       await worker.evaluate(async () => {
         await chrome.storage.local.set({ allowlist: [] });
       });

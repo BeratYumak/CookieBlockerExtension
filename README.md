@@ -60,8 +60,24 @@ Saha kanıtı (milliyet.com.tr, eklenti kapalı → açık):
 | **Kapalı** | Çerezlere dokunulmaz, sadece pop-up reddi çalışır. | Yalnızca banner'lardan kurtulmak isteyenler. |
 
 **İzin listesi:** Banka, e-posta, iş panelleri gibi oturumun kalması gereken
-siteleri popup'taki *"Bu sitede çerezlere izin ver"* ile veya ayarlar
-sayfasındaki listeye ekleyerek muaf tut. Alt alan adları otomatik kapsanır.
+siteleri popup'taki *"&lt;site&gt; için çerezlere izin ver"* ile veya ayarlar
+sayfasındaki listeye ekleyerek muaf tut.
+
+İzin **site bazlıdır, adres yolu (path) hiç dikkate alınmaz.** Popup'taki
+eylemler (izin ver / eklentiyi kapat / çerezleri sil) aktif sekmenin
+kayıtlanabilir alan adına (eTLD+1) uygulanır ve tüm alt alan adlarını kapsar:
+
+- `github.com/berat/proje` sayfasında izin ver → kayıt `github.com`,
+  `gist.github.com` ve `api.github.com` dahil site geneli muaf olur.
+- `gist.github.com` üzerinde izin ver → yine `github.com` yazılır; oturum çerezi
+  `.github.com` üzerinde durduğu için giriş bozulmaz.
+- `hepsiburada.com.tr`, `bbc.co.uk` gibi çok parçalı sonekler doğru ayrıştırılır;
+  `berat.github.io` / `proje.pages.dev` gibi paylaşımlı barındırma soneklerinde
+  kapsam yalnızca kendi alt alan adıdır (komşu sitelere sızmaz).
+- İzni kaldırdığında o sitenin altındaki daha dar kayıtlar da temizlenir.
+
+Daha dar bir kapsam istersen ayarlar sayfasındaki listeye tek bir alt alan adı
+(`gist.github.com`) elle yazabilirsin.
 
 ## Nasıl çalışıyor?
 
@@ -114,16 +130,17 @@ Türkçe dahil 10+ dil desteklenir (`Tümünü Reddet`, `Sadece Zorunlu Çerezle
 ```bash
 npm install            # jsdom + puppeteer-core (yalnızca test için)
 npm run lint           # tüm kaynaklarda söz dizimi kontrolü
-npm test               # 19 birim/DOM testi (jsdom)
-npm run e2e            # gerçek Brave'de 18 uçtan uca kontrol
+npm test               # 34 birim/DOM testi (jsdom)
+npm run e2e            # gerçek Brave'de 26 uçtan uca kontrol
 node test/real-sites.mjs   # canlı sitelerde saha kontrolü (ağ gerekir)
 ```
 
 Son doğrulama durumu:
 
-- `npm test` → 19/19 geçti
-- `npm run e2e` → 18/18 geçti (gerçek reddet tıklaması, API çağrısı, `Set-Cookie`
-  engelleme, sanal kavanoz, çerez duvarı, izin listesi istisnası, arayüzler)
+- `npm test` → 34/34 geçti
+- `npm run e2e` → 26/26 geçti (gerçek reddet tıklaması, API çağrısı, `Set-Cookie`
+  engelleme, sanal kavanoz, çerez duvarı, izin listesi istisnası, izin kapsamının
+  alt alan adlarını kapsaması, arayüzler)
 - `test/real-sites.mjs` → BBC, Hepsiburada, Milliyet, Zeit, Guardian: banner temiz,
   0 çerez, 13 gerçek reddetme; içerik karşılaştırmasında metin/bağlantı/görsel
   sayıları eklentisiz duruma **eşit** (site bozulmuyor).

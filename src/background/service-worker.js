@@ -55,7 +55,7 @@ async function applyRulesets(s) {
 async function applyAllowRules(s) {
   const existing = await chrome.declarativeNetRequest.getDynamicRules();
   const removeRuleIds = existing.map((r) => r.id);
-  const hosts = (s.allowlist || []).map((h) => String(h).trim().replace(/^www\./, '')).filter(Boolean);
+  const hosts = (s.allowlist || []).map((h) => CS.normHost(h)).filter(Boolean);
   const addRules = [];
   let id = ALLOW_RULE_BASE;
   const types = [
@@ -195,11 +195,14 @@ async function sweepClosedSites() {
 
 async function clearCookies(host) {
   const s = await getSettings();
-  const all = await chrome.cookies.getAll(host ? { domain: host } : {});
+  // Verilen host site kapsamıdır (eTLD+1); Chrome `domain` filtresi alt alan
+  // adlarını da kapsar.
+  const site = host ? CS.normHost(host) : null;
+  const all = await chrome.cookies.getAll(site ? { domain: site } : {});
   let n = 0;
   for (const c of all) {
     const domain = String(c.domain || '').replace(/^\./, '');
-    if (!host && CS.hostMatches(s.allowlist, domain)) continue;
+    if (!site && CS.hostMatches(s.allowlist, domain)) continue;
     if (await removeCookie(c)) n++;
   }
   return n;
@@ -252,6 +255,43 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
 // ------------------------------------------------------------------- mesajlaşma
 const tabCounters = new Map();
 
+/** Popup durumu: aktif sekmenin hostu + eylemlerin uygulanacağı site kapsamı. */
+async function buildState() {
+  const s = await getSettings(true);
+  let host = null;
+  let tabId = null;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab) {
+    tabId = tab.id;
+    try {
+      host = new URL(tab.url).hostname;
+    } catch (_) { /* yoksay */ }
+  }
+  // Eylemler (izin/kapat/temizle) sitenin tamamına uygulanır, tek alt alan
+  // adına değil: gist.github.com -> github.com
+  const site = host ? CS.registrableDomain(host) : null;
+  let cookieCount = null;
+  if (site) {
+    try {
+      cookieCount = (await chrome.cookies.getAll({ domain: site })).length;
+    } catch (_) { /* yoksay */ }
+  }
+  return {
+    ok: true,
+    settings: s,
+    host,
+    site,
+    tabId,
+    cookieCount,
+    tabActions: tabId ? tabCounters.get(tabId) || 0 : 0,
+    allowlisted: host ? CS.hostMatches(s.allowlist, host) : false,
+    siteDisabled: host ? CS.hostMatches(s.disabledSites, host) : false
+  };
+}
+
+// e2e testlerinin servis çalışanı içinden çağırabilmesi için
+self.CookieShieldSW = { buildState };
+
 async function bumpBadge(tabId, n) {
   if (!tabId) return;
   const cur = (tabCounters.get(tabId) || 0) + n;
@@ -287,32 +327,7 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
         return respond({ ok: true });
       }
       case 'cs:get-state': {
-        const s = await getSettings(true);
-        let host = null;
-        let tabId = null;
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (tab) {
-          tabId = tab.id;
-          try {
-            host = new URL(tab.url).hostname;
-          } catch (_) { /* yoksay */ }
-        }
-        let cookieCount = null;
-        if (host) {
-          try {
-            cookieCount = (await chrome.cookies.getAll({ domain: host })).length;
-          } catch (_) { /* yoksay */ }
-        }
-        return respond({
-          ok: true,
-          settings: s,
-          host,
-          tabId,
-          cookieCount,
-          tabActions: tabId ? tabCounters.get(tabId) || 0 : 0,
-          allowlisted: host ? CS.hostMatches(s.allowlist, host) : false,
-          siteDisabled: host ? CS.hostMatches(s.disabledSites, host) : false
-        });
+        return respond(await buildState());
       }
       case 'cs:set': {
         const s = await setSettings(msg.patch || {});
@@ -323,12 +338,9 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
         // msg.list: 'allowlist' | 'disabledSites'
         const s = await getSettings();
         const key = msg.list === 'disabledSites' ? 'disabledSites' : 'allowlist';
-        const host = String(msg.host || '').replace(/^www\./, '');
+        const host = CS.normHost(msg.host);
         if (!host) return respond({ ok: false });
-        const list = new Set(s[key] || []);
-        if (msg.on) list.add(host);
-        else list.delete(host);
-        await setSettings({ [key]: Array.from(list) });
+        await setSettings({ [key]: CS.toggleHostList(s[key], host, !!msg.on) });
         await applyAll();
         return respond({ ok: true, settings: await getSettings(true) });
       }
