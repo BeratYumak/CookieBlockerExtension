@@ -1,0 +1,17 @@
+{
+  "name": "cookie-shield",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Brave/Chromium eklentisi: çerez onay pop-uplarını reddeder, çerezleri engeller",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "lint": "for f in $(find src -name '*.js'); do node --check $f || exit 1; done; echo 'sozdizimi ok'",
+    "e2e": "node test/e2e-brave.mjs",
+    "package": "mkdir -p dist && rm -f dist/cookie-shield.zip && zip -qr dist/cookie-shield.zip manifest.json icons rules src LICENSE README.md && echo 'dist/cookie-shield.zip hazir'"
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0",
+    "puppeteer-core": "24.10.2"
+  }
+}

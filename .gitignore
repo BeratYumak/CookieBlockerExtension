@@ -1,0 +1,10 @@
+node_modules/
+*.log
+.DS_Store
+
+# Brave/Chrome paketlenmemiş eklentiyi yüklerken üretir
+_metadata/
+
+# Yayın paketleri
+dist/
+*.zip

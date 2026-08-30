@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Cookie Shield — Ayarlar</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <h1>🛡️ Cookie Shield</h1>
+      <p class="lead">
+        Çerez onay pop-up'larını sitenin kendi <b>“Reddet”</b> akışını tetikleyerek kapatır,
+        çerez duvarlarını aşar ve çerezleri seçtiğin moda göre engeller.
+      </p>
+
+      <fieldset>
+        <legend>Genel</legend>
+        <label class="check"><input type="checkbox" data-key="enabled" /> Korumayı etkinleştir</label>
+        <label class="check"><input type="checkbox" data-key="autoReject" /> Onay pop-up'larını otomatik reddet</label>
+        <label class="check"><input type="checkbox" data-key="hideAsLastResort" /> Reddet seçeneği yoksa banner'ı son çare olarak gizle</label>
+        <label class="check"><input type="checkbox" data-key="bypassCookieWalls" /> Çerez duvarını aş (kaydırma kilidi, bulanıklık, örtü katmanı)</label>
+        <label class="check"><input type="checkbox" data-key="hardBlockDocumentCookie" /> JS çerezlerini de engelle (<code>document.cookie</code> sanal kavanoza yazılır)</label>
+        <label class="check"><input type="checkbox" data-key="clearCookiesOnStartup" /> Tarayıcı her açıldığında tüm çerezleri sil</label>
+        <label class="check"><input type="checkbox" data-key="debug" /> Konsola ayrıntılı kayıt yaz</label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Çerez modu</legend>
+        <label class="check"><input type="radio" name="mode" value="blockAll" /> <b>Tümünü engelle</b> — tüm sitelerde <code>Cookie</code>/<code>Set-Cookie</code> başlıkları kaldırılır, JS çerezleri diske yazılmaz.</label>
+        <label class="check"><input type="radio" name="mode" value="sessionOnly" /> <b>Oturum boyu</b> — çerezler çalışır, sitenin son sekmesi kapanınca silinir. Girişler sayfa içinde bozulmaz.</label>
+        <label class="check"><input type="radio" name="mode" value="thirdParty" /> <b>Sadece 3. taraf</b> — takipçi çerezleri engellenir, sitenin kendi çerezleri kalır.</label>
+        <label class="check"><input type="radio" name="mode" value="off" /> <b>Kapalı</b> — çerezlere dokunulmaz, sadece pop-up reddi çalışır.</label>
+        <p class="hint">
+          “Tümünü engelle” en katı seçenek. Giriş yaptığın siteler oturumu koruyamaz;
+          onları aşağıdaki izin listesine ekle veya adres çubuğundaki simgeden
+          “Bu sitede çerezlere izin ver” de.
+        </p>
+      </fieldset>
+
+      <fieldset>
+        <legend>İzin listesi (çerezlere dokunulmaz)</legend>
+        <textarea data-list="allowlist" rows="6" spellcheck="false" placeholder="ornek.com&#10;banka.com.tr"></textarea>
+        <p class="hint">Her satıra bir alan adı. Alt alan adları otomatik kapsanır.</p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Eklentinin tamamen kapalı olduğu siteler</legend>
+        <textarea data-list="disabledSites" rows="4" spellcheck="false" placeholder="sorunlu-site.com"></textarea>
+        <p class="hint">Bu sitelerde pop-up reddi, gizleme ve kilit çözümü de çalışmaz.</p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Durum</legend>
+        <p id="stats" class="stats">—</p>
+        <div class="buttons">
+          <button id="save" class="primary">Kaydet</button>
+          <button id="clearAll" class="warn">Tüm çerezleri şimdi sil</button>
+          <button id="sweep">Kapanan sitelerin çerezlerini süpür</button>
+          <button id="reset">İstatistikleri sıfırla</button>
+        </div>
+        <p id="toast" class="toast"></p>
+      </fieldset>
+
+      <details>
+        <summary>Nasıl çalışıyor? / Bilinen sınırlar</summary>
+        <ul>
+          <li><b>Gerçek reddetme:</b> 25+ CMP için sağlayıcının kendi API'si (OneTrust, Cookiebot, Didomi, Usercentrics, Osano, Klaro, Iubenda, Complianz, tarteaucitron, Piwik PRO, consentmanager…) veya “Tümünü reddet” butonu tıklanır. Site rızayı “red” olarak kaydeder, bu yüzden özellikleri kapanmaz ve banner tekrar açılmaz.</li>
+          <li><b>Bilinmeyen CMP:</b> Sezgisel tarama banner'ı bulur; “Reddet” yoksa tercih panelini açıp isteğe bağlı kutuları kapatır ve kaydeder.</li>
+          <li><b>Reddetmeye izin vermeyen siteler:</b> Rıza kaydedilemiyorsa banner + örtü katmanı gizlenir, kaydırma kilidi ve bulanıklık kaldırılır. Ayrıca her istekte <code>Sec-GPC: 1</code> ve <code>DNT: 1</code> gönderilir; Google Consent Mode'a “denied” bildirilir.</li>
+          <li><b>Sunucu tarafı çerez duvarı</b> (içerik hiç gönderilmiyorsa) tarayıcı eklentisiyle aşılamaz — bu durumda ödeme/abonelik duvarı vardır.</li>
+          <li><b>Sanal kavanoz:</b> “Tümünü engelle” modunda <code>document.cookie</code> hafızada tutulur; sayfa çalışır ama çerez diske yazılmaz, sunucuya gönderilmez, sekme kapanınca yok olur.</li>
+        </ul>
+      </details>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

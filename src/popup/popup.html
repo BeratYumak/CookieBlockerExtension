@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Cookie Shield</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <span class="shield" aria-hidden="true">🛡️</span>
+      <h1>Cookie Shield</h1>
+      <label class="switch">
+        <input type="checkbox" id="enabled" />
+        <span id="enabledLabel">Açık</span>
+      </label>
+    </header>
+
+    <section>
+      <h2>Bu site</h2>
+      <div class="host" id="host">—</div>
+      <div class="row"><span>Bu sayfada engellenen pop-up</span><span id="tabActions">0</span></div>
+      <div class="row"><span>Sitede duran çerez</span><span id="cookieCount">—</span></div>
+    </section>
+
+    <section>
+      <h2>Çerez modu</h2>
+      <div class="modes" id="modes">
+        <label class="mode">
+          <input type="radio" name="mode" value="blockAll" />
+          <span><b>Tümünü engelle</b><small>Tüm sitelerde çerez yazımı/gönderimi engellenir (en katı).</small></span>
+        </label>
+        <label class="mode">
+          <input type="radio" name="mode" value="sessionOnly" />
+          <span><b>Oturum boyu</b><small>Çerezler çalışır ama sekme kapanınca silinir. Girişler bozulmaz.</small></span>
+        </label>
+        <label class="mode">
+          <input type="radio" name="mode" value="thirdParty" />
+          <span><b>Sadece 3. taraf</b><small>Takipçi çerezleri gider, sitenin kendi çerezleri kalır.</small></span>
+        </label>
+        <label class="mode">
+          <input type="radio" name="mode" value="off" />
+          <span><b>Kapalı</b><small>Çerezlere dokunulmaz, sadece onay pop-up'ları reddedilir.</small></span>
+        </label>
+      </div>
+    </section>
+
+    <section>
+      <h2>Eylemler</h2>
+      <div class="actions">
+        <button id="scan" class="primary">Bu sayfayı şimdi tara ve reddet</button>
+        <button id="allow">Bu sitede çerezlere izin ver</button>
+        <button id="disable">Bu sitede eklentiyi kapat</button>
+        <button id="clear" class="warn">Bu sitenin çerezlerini sil</button>
+      </div>
+      <div class="note" id="note"></div>
+    </section>
+
+    <div class="toast" id="toast"></div>
+
+    <footer>
+      <span id="stats">—</span>
+      <a href="#" id="openOptions">Ayarlar</a>
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
